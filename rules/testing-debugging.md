@@ -1,8 +1,8 @@
 # Testing & Debugging
 
-## Rule #1: `Logger.log` ทุก critical path + execution boundary
+## Rule #1: `Logger.log` on every critical path + execution boundary
 
-**Why:** GAS ไม่มี breakpoint debugger ที่ดี — log คือ source of truth
+**Why:** GAS has no good breakpoint debugger — logs are the source of truth
 
 ### ✓ Good — entry + exit log
 
@@ -25,13 +25,13 @@ function generatePdfForRecord(callerUserId, rowIndex) {
 }
 ```
 
-ดู log: **Apps Script Editor → Executions** (left sidebar)
+Read the logs: **Apps Script Editor → Executions** (left sidebar)
 
 ---
 
-## Rule #2: log มี prefix `[FunctionName]` เสมอ
+## Rule #2: always prefix logs with `[FunctionName]`
 
-ตอน debug execution log มีหลายร้อยบรรทัด — กรองด้วย prefix:
+An execution log can run to hundreds of lines while debugging — filter by prefix:
 
 ```
 [PDF] start callerUserId=U002
@@ -42,12 +42,12 @@ function generatePdfForRecord(callerUserId, rowIndex) {
 
 ---
 
-## Rule #3: log structured data — ไม่ใช่ string concat ทั้งก้อน
+## Rule #3: log structured data — not one giant string concat
 
 ### ✗ Bad
 
 ```javascript
-Logger.log(JSON.stringify(hugeObject));  // อ่านยาก, ตัด stack trace
+Logger.log(JSON.stringify(hugeObject));  // hard to read, truncates the stack trace
 ```
 
 ### ✓ Good
@@ -56,7 +56,7 @@ Logger.log(JSON.stringify(hugeObject));  // อ่านยาก, ตัด sta
 Logger.log('[saveRecord] user=' + caller.UserID + ' role=' + caller.Role + ' folderId=' + payload.folderId);
 ```
 
-หรือถ้าต้องการ inspect object เต็ม:
+Or when you need to inspect the whole object:
 
 ```javascript
 console.log('record=', record); // V8 runtime support console.log + object
@@ -64,9 +64,9 @@ console.log('record=', record); // V8 runtime support console.log + object
 
 ---
 
-## Rule #4: test function manual — ใช้ Apps Script editor
+## Rule #4: manual test functions — use the Apps Script editor
 
-สร้าง test function ไม่ commit prod:
+Create test functions that never get committed to production:
 
 ```javascript
 function _test_generatePdf() {
@@ -75,15 +75,15 @@ function _test_generatePdf() {
 }
 ```
 
-วิธีรัน: Apps Script editor → เลือกชื่อ function จาก dropdown → Run
+How to run: Apps Script editor → pick the function name from the dropdown → Run
 
-**Prefix `_test_`** — บอกตัวเองว่า ห้ามให้ client เรียก + grep หาง่ายตอน cleanup
+**The `_test_` prefix** — tells you at a glance the client must never call it + is easy to grep for during cleanup
 
 ---
 
-## Rule #5: e2e test ผ่าน fetch / curl
+## Rule #5: e2e tests via fetch / curl
 
-ถ้า web app deploy แล้ว — สมมุติ endpoint:
+Once the web app is deployed — assume this endpoint:
 
 ```bash
 # .env.test
@@ -112,7 +112,7 @@ async function test_generatePdf() {
 test_generatePdf().catch(e => { console.error(e); process.exit(1); });
 ```
 
-ต้อง implement `doPost(e)` ที่ dispatch ฟังก์ชันตามชื่อ — **allow-list เป็นส่วนหนึ่งของ dispatcher เสมอ** (dispatcher ที่เรียก `globalThis[name]` ตรง ๆ = ใครก็เรียก function ภายในทุกตัวได้ รวมถึง `_test_*` และ helper ที่ข้าม auth):
+You must implement `doPost(e)` that dispatches by function name — **the allow-list is always part of the dispatcher** (a dispatcher that calls `globalThis[name]` directly = anyone can call any internal function, including `_test_*` and helpers that skip auth):
 
 ```javascript
 const RPC_ALLOWED = ['login', 'saveRecord', 'generatePdfForRecord' /* ... */];
@@ -133,22 +133,22 @@ function doPost(e) {
 
 ---
 
-## Rule #6: clasp run — เรียก function จาก CLI
+## Rule #6: clasp run — call a function from the CLI
 
 ```bash
 clasp run 'generatePdfForRecord' --params '["U002", 2]'
 ```
 
-ต้อง enable Apps Script API + setup OAuth: <https://script.google.com/home/usersettings>
+Requires enabling the Apps Script API + OAuth setup: <https://script.google.com/home/usersettings>
 
 ---
 
-## Rule #7: cleanup state ระหว่าง test
+## Rule #7: clean up state between tests
 
 ```javascript
 function _test_setup() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  // ลบ records test เก่า
+  // delete leftover test records
   const sh = ss.getSheetByName('Records');
   const data = sh.getDataRange().getValues();
   for (let i = data.length - 1; i >= 1; i--) {
@@ -159,18 +159,18 @@ function _test_setup() {
 
 ---
 
-## Rule #8: Stackdriver / Cloud Logging — สำหรับ production
+## Rule #8: Stackdriver / Cloud Logging — for production
 
-ใน `appsscript.json`:
+In `appsscript.json`:
 ```json
 { "exceptionLogging": "STACKDRIVER" }
 ```
 
-Exception ทุก function จะถูก log ใน Google Cloud Logging — ดูที่ Apps Script editor → Executions (filter "ผิดพลาด" / Failed)
+Exceptions from every function get logged in Google Cloud Logging — view them at Apps Script editor → Executions (filter "Failed")
 
 ---
 
-## Rule #9: timing log — หา bottleneck
+## Rule #9: timing logs — find the bottleneck
 
 ```javascript
 function generatePdfForRecord(callerUserId, rowIndex) {
@@ -187,11 +187,11 @@ function generatePdfForRecord(callerUserId, rowIndex) {
 }
 ```
 
-GAS execution quota = 6 นาที — รู้ว่า step ไหนช้าจะได้ optimize ก่อนถึง limit
+GAS execution quota = 6 minutes — knowing which step is slow lets you optimize before hitting the limit
 
 ---
 
-## Rule #10: rate limit — ระวัง quota daily
+## Rule #10: rate limits — watch the daily quotas
 
 | Service | Limit (Consumer) | Limit (Workspace) |
 |---|---|---|
@@ -201,24 +201,24 @@ GAS execution quota = 6 นาที — รู้ว่า step ไหนช้
 | Script execution time | 6 min | 6 min |
 | Custom function exec | 30 s | 30 s |
 
-ทำ counter ใน Config sheet ถ้า near quota — ส่ง alert ก่อนพัง
+Keep a counter in the Config sheet when you are near a quota — send an alert before it breaks
 
 ---
 
-## Rule #11: ห้ามให้ `| grep` มาบังรหัสจบของเทสในคำสั่ง deploy
+## Rule #11: never let `| grep` mask the test exit code in a deploy command
 
-**Why:** `npm test | grep 'fail'` คืน exit code ของ **grep** ไม่ใช่ของเทส — เคย `clasp deploy` ขึ้น production ทั้งที่เทสพัง 3 ตัว เพราะ pipe บังไว้
+**Why:** `npm test | grep 'fail'` returns the exit code of **grep**, not the tests — `clasp deploy` once shipped to production while 3 tests were failing, because the pipe hid it
 
 ```bash
-# ✗ Bad — exit code ของ grep บังของเทส, && ผ่านเสมอ
+# ✗ Bad — grep's exit code masks the tests, && always passes
 node --test tests/ | grep -E '^# (pass|fail)' && clasp push && clasp deploy -i "$DEPLOY_ID"
 
-# ✓ Good — เทสเป็นตัวตัดสิน, output ทิ้งไป
+# ✓ Good — the tests decide, output is discarded
 node --test tests/ > /dev/null && clasp push && clasp deploy -i "$DEPLOY_ID"
 
-# ✓ Good — ถ้าอยากเห็น summary ด้วย ใช้ PIPESTATUS (bash) หรือ pipefail
+# ✓ Good — if you want the summary too, use PIPESTATUS (bash) or pipefail
 set -o pipefail
 node --test tests/ | tail -20 && clasp push
 ```
 
-**Edge case:** หลักเดียวกันกับทุก pipeline ที่เป็น gate ของ deploy — `tee`, `head`, `sort` บัง exit code ได้หมด
+**Edge case:** the same applies to every pipeline that gates a deploy — `tee`, `head`, `sort` all mask the exit code

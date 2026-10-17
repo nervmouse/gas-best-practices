@@ -1,34 +1,34 @@
-# Data Integrity — กันเขียนทับ, กันลบยกชุด, ตรวจหลังแก้
+# Data Integrity — Prevent Overwrites, Prevent Bulk Deletes, Verify After Editing
 
-ไฟล์นี้ว่าด้วย GAS ที่ทำหน้าที่เป็น **ฐานข้อมูลจริงของงานที่แก้ไม่ได้** (ยอดเงิน, สต๊อก, ทะเบียนเลขที่) — บักในหมวดนี้ไม่ทำให้โปรแกรม error แต่ทำให้ **ข้อมูลผิดเงียบ ๆ**
+This file is about GAS that acts as the **real, non-reversible system of record** (money balances, stock, registration numbers) — a bug in this category does not make the program crash, it makes the **data quietly wrong**
 
 | # | Rule |
 |---|---|
-| 1 | บังคับให้ client ส่ง `rev` ทุกครั้งที่เขียนทับทั้งชุด — ไม่ส่ง = ปฏิเสธ |
-| 2 | circuit breaker กันลบยกชุด |
-| 3 | งานหลังบันทึกต้องอยู่ใน try/catch — ห้ามทำให้ save ที่สำเร็จแล้วกลายเป็น error |
-| 4 | field ที่ server เป็นเจ้าของ ห้ามให้ payload จาก client ทับ |
-| 5 | reconcile ต้องอ่านจาก **ทุกที่** ที่เก็บค่าจริง |
-| 6 | ยืนยันผลด้วย "ตัวตน" ไม่ใช่ "ยอดรวม" |
+| 1 | Force the client to send `rev` on every full overwrite — not sent = reject |
+| 2 | A circuit breaker that prevents bulk deletes |
+| 3 | Post-save work must sit inside try/catch — never turn a successful save into an error |
+| 4 | Server-owned fields must not be overwritten by the client payload |
+| 5 | Reconcile must read from **every** place the value is stored |
+| 6 | Verify the result by "identity", not by "total" |
 
 ---
 
-## Rule #1: บังคับให้ client ส่ง `rev` ทุกครั้งที่เขียนทับทั้งชุด — ไม่ส่ง = ปฏิเสธ
+## Rule #1: Force the client to send `rev` on every full overwrite — not sent = reject
 
-**Why:** production จริง — แท็บเบราว์เซอร์ที่ค้างไว้ 3 สัปดาห์ถูกเปิดขึ้นมาใหม่ แล้ว sync state เก่าใน `localStorage` ขึ้นทับ ลบการจอง 179 รายการในวินาทีเดียว โค้ดมีด่านเช็ค `rev` อยู่แล้ว แต่เขียนเป็น "ถ้า*มี* `rev` แล้วค่อยเทียบ" — client เก่าที่ไม่รู้จัก field นี้เลยผ่านฉลุย
+**Why:** this happened in production — a browser tab that had been left sitting for 3 weeks was opened again and synced its stale `localStorage` state back up, wiping 179 bookings in a single instant. The code already had a `rev` guard, but it was written as "if `rev` *is present*, then compare" — an old client that has never heard of the field sails straight through
 
-ด่าน optimistic lock ที่ข้ามได้ด้วยการ**ไม่ส่ง field** ไม่ใช่ด่าน
+An optimistic-lock gate that can be bypassed by simply **not sending the field** is not a gate
 
-**ใช้กับทุกคำสั่งที่เปลี่ยนสถานะ ไม่ใช่แค่ปุ่มบันทึก** — ข้าม / เลื่อน / ทำเสร็จ / เลื่อนเตือน / ยกเลิก ก็เป็น write เหมือนกัน (เจอจริง: ปุ่ม "เลื่อนเตือน" บนการ์ดเก่าที่ค้างอยู่ เลื่อนงวดถัดไปที่ยังไม่ถึง และเลื่อนรายการที่ปิดใช้งานไปแล้วได้ เพราะคำสั่งนี้ไม่ได้ตรวจสถานะปัจจุบันเหมือนคำสั่งอื่น)
+**Apply this to every state-changing command, not just the save button** — skip / advance / complete / postpone / cancel are all writes too (seen in the wild: the "Postpone" button on a stale card advanced the next installment that was not even due yet, and postponed entries that had already been disabled, because that command never checked the current state the way the other commands did)
 
-- หน้าเว็บส่ง **สถานะที่กำลังเห็น** มาด้วยทุกครั้ง (`rev` ของแถว หรือค่าที่ตัดสินใจจากมัน เช่น วันครบกำหนดของงวดที่กดเลื่อน)
-- server ตรวจ**ภายใน lock** ว่ายังตรงกับข้อมูลจริง และรายการยังเปิดใช้งานอยู่ ก่อนเขียน — ไม่ตรงให้ปฏิเสธพร้อมบอกว่าข้อมูลเปลี่ยนไปแล้ว ให้โหลดใหม่
-- เขียน helper เดียว (`assertCurrent_(row, seen)`) แล้วเรียกจาก**ทุก**คำสั่ง จะได้ไม่มีคำสั่งไหนหลุด
+- The web page sends **the state it is currently looking at** every time (the row's `rev`, or whatever value it decided from — e.g. the due date of the installment whose button was pressed)
+- The server checks **inside the lock** that it still matches the real data and that the entry is still enabled, before writing — on a mismatch, reject and tell the user the data has already changed, ask them to reload
+- Write one helper (`assertCurrent_(row, seen)`) and call it from **every** command, then no command can slip through
 
 ### ✗ Bad
 
 ```javascript
-// ผ่านได้ถ้า body.rev เป็น undefined / '' / ไม่ส่งมาเลย
+// passes if body.rev is undefined / '' / never sent at all
 if (body.rev !== undefined && body.rev !== null && body.rev !== '' &&
     !isNaN(Number(body.rev)) && Number(body.rev) !== curRev) {
   return json_({ ok: false, conflict: true, rev: curRev, state: readState_() });
@@ -42,58 +42,58 @@ writeState_(body.state);
 var curRev = rev_();
 var sentRev = Number(body.rev);
 
-// ไม่ส่ง rev = client เก่า / ไม่รู้ว่าข้อมูลตัวเองเก่าแค่ไหน → ปฏิเสธ
+// rev not sent = old client / does not know how stale its own data is → reject
 if (body.rev === undefined || body.rev === null || body.rev === '' || isNaN(sentRev)) {
   return json_({
     ok: false, conflict: true, rev: curRev, state: readState_(),
-    error: 'คำขอบันทึกไม่ได้ระบุเวอร์ชันข้อมูล — ระบบโหลดข้อมูลล่าสุดให้แล้ว กรุณาลองบันทึกใหม่'
+    error: 'Save request did not specify a data version — the latest data has already been loaded, please save again'
   });
 }
 if (sentRev !== curRev) {
   return json_({ ok: false, conflict: true, rev: curRev, state: readState_(),
-                 error: 'มีคนอื่นบันทึกไปก่อน — โหลดข้อมูลล่าสุดให้แล้ว' });
+                 error: 'Someone else saved first — the latest data has already been loaded' });
 }
 ```
 
-**Edge case:** ตอบ conflict ให้แนบ `state` ล่าสุดกลับไปด้วยเสมอ — client จะได้ merge ต่อได้ทันที ไม่ต้องยิงอีกรอบ (ซึ่งบน GAS = เข้าคิวอีกรอบ)
+**Edge case:** always attach the latest `state` to a conflict response — the client can then merge immediately without firing another round trip (which on GAS = another queue cycle)
 
 ---
 
-## Rule #2: circuit breaker กันลบยกชุด
+## Rule #2: A circuit breaker that prevents bulk deletes
 
-**Why:** `rev` กันได้เฉพาะ "ข้อมูลเก่าเขียนทับข้อมูลใหม่" แต่ **ไม่กัน bug ฝั่ง client ที่ส่ง state พังมาพร้อม rev ที่ถูกต้อง** — เช่น state ว่างเปล่าเพราะ parse ล้มเหลว ถ้าไม่มีเพดาน การบันทึกครั้งเดียวลบทั้งฐานข้อมูลได้
+**Why:** `rev` only stops "stale data overwriting new data" — it does **not** stop a client-side bug that sends corrupt state along with a perfectly valid `rev` — e.g. empty state because parsing failed. Without a ceiling, a single save can delete the entire database
 
-ขีดจำกัดควรตั้งจาก "พฤติกรรมปกติของคนใช้งาน" (คนกดลบทีละ 1-2 รายการ) ไม่ใช่จากขนาดข้อมูล
+The ceiling should be set from "normal user behaviour" (a person deleting 1–2 entries at a time), not from the size of the data
 
 ### ✓ Good
 
 ```javascript
 var MAX_DELETES_PER_SAVE = 5;
 
-var deletes = pendingChanges.filter(function (c) { return c.action === 'ลบการจอง'; });
+var deletes = pendingChanges.filter(function (c) { return c.action === 'deleteBooking'; });
 if (deletes.length > MAX_DELETES_PER_SAVE && body.confirmBulkDelete !== true) {
   return json_({
     ok: false, bulkDeleteBlocked: true, rev: curRev, state: readState_(),
     deleteCount: deletes.length,
     deleteNames: deletes.slice(0, 10).map(function (c) { return c.name; }),
-    error: 'คำขอนี้จะลบ ' + deletes.length + ' รายการพร้อมกัน — ระบบระงับไว้ก่อน'
+    error: 'This request will delete ' + deletes.length + ' entries at once — the system has held it back'
   });
 }
 ```
 
-**Edge case:** ทางปลดล็อกต้องเป็นสิ่งที่ "จงใจส่ง" (`confirmBulkDelete: true`) และ **ห้ามมีปุ่มยืนยันในหน้าเว็บ** ที่คนกดพลาดได้ — ให้ลบจริงผ่าน custom menu ในชีทแทน ([onopen-menu.md](onopen-menu.md))
+**Edge case:** the unlock path must be something that is "deliberately sent" (`confirmBulkDelete: true`) and there must be **no confirm button in the web UI** that a person can hit by accident — do the real deletion through a custom menu in the sheet instead ([onopen-menu.md](onopen-menu.md))
 
 ---
 
-## Rule #3: งานหลังบันทึกต้องอยู่ใน try/catch — ห้ามทำให้ save ที่สำเร็จแล้วกลายเป็น error
+## Rule #3: Post-save work must sit inside try/catch — never turn a successful save into an error
 
-**Why:** `writeState_()` เขียนลงชีทไปแล้ว = commit แล้ว ถ้า `refreshSummaries_()` ที่ตามมา throw ผู้ใช้จะเห็น "บันทึกไม่สำเร็จ" ทั้งที่ข้อมูลเข้าเรียบร้อย → กดซ้ำ → ข้อมูลซ้ำ
+**Why:** once `writeState_()` has written to the sheet = it is committed. If the `refreshSummaries_()` that follows throws, the user sees "save failed" even though the data went in perfectly well → they press it again → duplicate data
 
 ### ✗ Bad
 
 ```javascript
 writeState_(body.state);
-refreshSummaries_();      // throw ที่นี่ = ผู้ใช้เห็นว่า save fail
+refreshSummaries_();      // a throw here = the user sees the save fail
 return json_({ ok: true, rev: bumpRev_() });
 ```
 
@@ -103,7 +103,7 @@ return json_({ ok: true, rev: bumpRev_() });
 writeState_(body.state);
 var newRev = bumpRev_();
 
-// derived data ซ่อมทีหลังได้ แต่ "บอกผู้ใช้ผิด" ซ่อมไม่ได้
+// derived data can be repaired later, but "telling the user the wrong thing" cannot
 var summaryError = null;
 try {
   refreshSummaries_();
@@ -114,54 +114,54 @@ try {
 return json_({ ok: true, rev: newRev, summaryError: summaryError });
 ```
 
-**Edge case:** ใช้หลักนี้กับ **ทุกอย่างที่อยู่หลังจุด commit** — ส่งเมล, เขียน audit log, ล้าง cache, เรียก API ภายนอก
+**Edge case:** apply this to **everything that lives after the commit point** — sending mail, writing the audit log, clearing the cache, calling external APIs
 
 ---
 
-## Rule #4: field ที่ server เป็นเจ้าของ ห้ามให้ payload จาก client ทับ
+## Rule #4: Server-owned fields must not be overwritten by the client payload
 
-**Why:** frontend รู้จักข้อมูลแค่บางส่วน ถ้า `writeState_` เขียนทั้งแถวจาก object ที่ client ส่งมา ค่าที่ client ไม่มี (ยอดเงินที่บันทึกจากอีกหน้าจอ, สถานะที่ระบบคำนวณเอง) จะถูกล้างเป็นค่าว่าง — เงียบสนิท ไม่มี error
+**Why:** the frontend only knows part of the data. If `writeState_` writes the whole row from the object the client sent, then values the client does not have (an amount paid in from another screen, a status the system computes itself) get blanked out — completely silent, no error
 
 ### ✗ Bad
 
 ```javascript
 rows.push([b.id, b.name, b.kind, b.phone,
-           Number(b.paidAmount) || '',           // client ไม่รู้ยอดนี้ → ล้างเป็นว่าง
-           ST_TH[b.status] || 'ยังไม่ชำระ']);    // สถานะที่ซ่อมไว้แล้ว ถูกตีกลับ
+           Number(b.paidAmount) || '',           // the client does not know this amount → blanked out
+           ST_TH[b.status] || 'unpaid']);    // a status that was already repaired gets reverted
 ```
 
 ### ✓ Good
 
 ```javascript
-// 1) อ่านค่าที่ server เป็นเจ้าของไว้ก่อน — เก็บเฉพาะแถวที่ "มีค่าอยู่จริง"
-//    แถวที่ยังว่างไม่ต้องเก็บ ปล่อยให้ client เขียนค่าแรกเข้ามาได้
+// 1) Read the server-owned values first — keep only the rows that "actually have a value"
+//    Rows that are still empty do not need keeping; let the client write the first value in
 var keepPaid = {}, keepStatus = {};
 existingRows.forEach(function (r) {
-  var id = r['รหัส'];
-  if (r['ยอดที่รับจริง'] !== '' && r['ยอดที่รับจริง'] != null) keepPaid[id] = r['ยอดที่รับจริง'];
-  if (r['สถานะ']) keepStatus[id] = r['สถานะ'];
+  var id = r['code'];
+  if (r['amountReceived'] !== '' && r['amountReceived'] != null) keepPaid[id] = r['amountReceived'];
+  if (r['status']) keepStatus[id] = r['status'];
 });
 
-// 2) แถวไหนที่ระบบมีค่าของตัวเองอยู่แล้ว = ล็อก ไม่ให้ payload จาก client ทับ
+// 2) Rows where the system already owns a value = locked, do not let the client payload overwrite
 var hasOwn = Object.prototype.hasOwnProperty;
 var rows = body.state.bookings.map(function (b) {
   return [b.id, b.name, b.kind, b.phone,
           hasOwn.call(keepPaid, b.id)   ? keepPaid[b.id]   : (Number(b.paidAmount) || ''),
-          hasOwn.call(keepStatus, b.id) ? keepStatus[b.id] : (ST_TH[b.status] || 'ยังไม่ชำระ')];
+          hasOwn.call(keepStatus, b.id) ? keepStatus[b.id] : (ST_TH[b.status] || 'unpaid')];
 });
 ```
 
-**Edge case:** ตรวจว่า "ล็อก" ผูกกับค่าที่ server มีอยู่จริง ไม่ใช่ flag ที่ประกาศไว้เฉย ๆ — ธง `locked` ที่ไม่เคยถูกเซตเป็น `true` จะเงียบสนิทและทำตัวเหมือนไม่มีด่านเลย
+**Edge case:** check that the "lock" is bound to a value the server genuinely holds, not a flag that was merely declared — a `locked` flag that is never actually set to `true` is completely silent and behaves as if there were no gate at all
 
-**Edge case 2:** ทางที่สะอาดกว่าคือ **อย่าให้ client ส่ง field พวกนี้มาเลย** — ให้แก้ผ่าน endpoint เฉพาะทาง (`action=recordPayment`) ที่ตรวจสิทธิ์และคำนวณเองฝั่ง server ([web-app-rpc.md](web-app-rpc.md) Rule: คำนวณค่าสำคัญซ้ำฝั่ง server)
+**Edge case 2:** the cleaner path is **do not let the client send these fields at all** — change them through a dedicated endpoint (`action=recordPayment`) that checks permissions and computes server-side ([web-app-rpc.md](web-app-rpc.md) Rule: recompute critical values server-side)
 
 ---
 
-## Rule #5: reconcile ต้องอ่านจาก **ทุกที่** ที่เก็บค่าจริง
+## Rule #5: Reconcile must read from **every** place the value is stored
 
-**Why:** เขียน job ซ่อมสถานะ "ใครจ่ายแล้วแต่ยังขึ้นว่าค้าง" โดยอ่านจากคอลัมน์ยอดเงินในตารางหลักอย่างเดียว → รันแล้วซ่อมได้ 0 รายการ เพราะแถวที่พังคือแถวที่เงินถูกบันทึกไว้ใน **ตารางรับเงินอีกใบ** ไม่ใช่ในคอลัมน์นั้น
+**Why:** you write a status-repair job for "who has already paid but still shows as outstanding" that reads only the amount column in the main table → it runs and repairs 0 entries, because the broken rows are the ones where the money was recorded in **a separate payment log sheet**, not in that column
 
-ก่อนเขียน reconcile ให้ไล่ก่อนว่าค่าเดียวกันนี้ถูกบันทึกได้จากกี่ทาง
+Before writing the reconcile, trace first how many paths can write that same value
 
 ### ✓ Good
 
@@ -169,15 +169,15 @@ var rows = body.state.bookings.map(function (b) {
 function reconcilePaidStatus_(bookingRows, paymentRows) {
   var logPaid = {};
   paymentRows.forEach(function (p) {
-    logPaid[p['รหัสผู้จอง']] = (logPaid[p['รหัสผู้จอง']] || 0) + (Number(p['ยอดที่รับ']) || 0);
+    logPaid[p['bookingCode']] = (logPaid[p['bookingCode']] || 0) + (Number(p['amountReceived']) || 0);
   });
 
   var fixed = 0;
   bookingRows.forEach(function (b) {
-    // เงินอยู่ได้ 2 ที่ → เอาค่าที่มี ไม่ใช่บวกกัน (บวก = นับซ้ำ)
-    var paid = Number(b['ยอดที่รับจริง']) || logPaid[b['รหัส']] || 0;
-    if (paid >= Number(b['ยอดที่ต้องชำระ']) && b['สถานะ'] !== 'ชำระแล้ว') {
-      sh.getRange(b._row, ST_COL).setValue('ชำระแล้ว');  // upgrade ทางเดียว
+    // the money can live in 2 places → take whichever exists, do not add them together (adding = double counting)
+    var paid = Number(b['amountReceived']) || logPaid[b['code']] || 0;
+    if (paid >= Number(b['amountDue']) && b['status'] !== 'paid') {
+      sh.getRange(b._row, ST_COL).setValue('paid');  // one-way upgrade
       fixed++;
     }
   });
@@ -185,24 +185,24 @@ function reconcilePaidStatus_(bookingRows, paymentRows) {
 }
 ```
 
-**Edge case:** job ซ่อมข้อมูลควร **ขึ้นทางเดียว** (ยังไม่จ่าย → จ่ายแล้ว) ห้าม downgrade อัตโนมัติ — ถ้าลอจิกผิด upgrade ผิดยัง audit ย้อนได้ แต่ downgrade ผิดจะไปลบสถานะที่คนกรอกมือไว้
+**Edge case:** a data-repair job should move **one way only** (outstanding → paid), never downgrade automatically — if the logic wrongly upgrades, that mistake can still be audited afterwards, but a wrong downgrade wipes out a status that a person entered by hand
 
-**Edge case 2:** หลังรัน reconcile ต้อง `bumpRev_()` + invalidate cache ด้วย ไม่งั้นหน้าเว็บยังเสิร์ฟค่าเดิมจาก cache จนดูเหมือน job ไม่ทำงาน ([cache-service.md](cache-service.md) Rule #2)
+**Edge case 2:** after reconcile runs you must also `bumpRev_()` + invalidate the cache, otherwise the web page keeps serving the old value from cache and it looks like the job did nothing ([cache-service.md](cache-service.md) Rule #2)
 
 ---
 
-## Rule #6: ยืนยันผลด้วย "ตัวตน" ไม่ใช่ "ยอดรวม"
+## Rule #6: Verify the result by "identity", not by "total"
 
-**Why:** ย้ายเล่มบัตรให้หน่วยงานหนึ่ง แล้วตรวจว่า "280 ใบ · 63,500 บาท · คงเหลือ 0" — ผ่านทุกข้อ **แต่เป็นคนละเล่มกับของจริงที่ส่งถึงมือคนไปแล้ว** จำนวนถูก ตัวตนผิด และ checksum แบบยอดรวมจับไม่ได้เลย
+**Why:** you hand a batch of card coupons over to one department, then check "280 coupons · 63,500 baht · 0 remaining" — every check passes **but they are a different batch from the ones actually delivered into the recipient's hand**. The count is right, the identity is wrong, and an aggregate checksum cannot catch that at all
 
-ข้อมูลที่มี "ตัวตน" (เลขที่เอกสาร, เลขบัตร, serial, เลขที่นั่ง) ต้องเทียบ**ตัวเลขจริงทีละตัว**
+Data that has an "identity" (document number, card number, serial, seat number) must be compared **number by number**
 
-### ✓ Good — endpoint ตรวจรายรายการ เรียกได้ทั้งก่อนและหลังแก้
+### ✓ Good — an endpoint that checks item by item, callable both before and after the edit
 
 ```javascript
 function crossCheckOne_(code) {
-  var actual = readAssignedNumbers_(code);      // ที่ระบบถืออยู่จริง
-  var expect = readRegistryNumbers_(code);      // ที่ทะเบียนต้นทางบอก
+  var actual = readAssignedNumbers_(code);      // what the system actually holds
+  var expect = readRegistryNumbers_(code);      // what the source registry says
 
   return {
     code: code,
@@ -215,8 +215,8 @@ function crossCheckOne_(code) {
 }
 ```
 
-ผลที่ยอมรับได้มีแบบเดียว: `missing` และ `extra` **ว่างทั้งคู่** — `countMatch: true` เฉย ๆ ไม่นับ
+There is only one acceptable result: `missing` and `extra` **both empty** — a `countMatch: true` on its own does not count
 
-**Edge case:** เอาต์พุตบีบเป็นช่วง (`261-262, 280-289`) ให้คนอ่านจับผิดได้ด้วยตา — รายการเลข 280 ตัวเรียงกันคนไม่อ่าน
+**Edge case:** compress the output into ranges (`261-262, 280-289`) so a human can still catch the mistake by eye — nobody reads a list of 280 numbers laid out one after another
 
-**Edge case 2:** เครื่องมือตรวจที่สร้างไว้แล้วแต่ไม่ได้หยิบมาใช้ = ไม่มี ถ้ามี endpoint แบบนี้ ให้รัน **ก่อนแก้และหลังแก้** ทุกครั้ง แล้วแปะผลทั้งสองรอบให้ผู้ใช้เทียบ
+**Edge case 2:** a verification tool that already exists but was never pulled out and used = it does not exist. If you have an endpoint like this, run it **before and after every edit**, then paste the results from both rounds for the user to compare

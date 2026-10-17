@@ -1,31 +1,31 @@
 # Security
 
-## Rule #1: ทุก server function ที่ client เรียกได้ ต้อง `requireUser_` + `requireRole_`
+## Rule #1: Every server function the client can call needs `requireUser_` + `requireRole_`
 
-**Why:** web app ที่ deploy `executeAs: USER_DEPLOYING` รันด้วยสิทธิ์ owner — ไม่มี per-request auth จาก Google ฝั่ง user
+**Why:** a web app deployed with `executeAs: USER_DEPLOYING` runs with the owner's rights — Google gives you no per-request auth from the user's side
 
-### ✓ Good — guard ทุก function
+### ✓ Good — guard every function
 
 ```javascript
 function deleteRecord(callerUserId, recordId) {
-  // อ้าง record ด้วย RecordID ไม่ใช่ row number จาก client — row เลื่อนได้ตลอดเวลา
-  // (มีคนลบแถวอื่นก่อนหน้า → row number เดิมชี้ record คนละตัว = ลบผิดแถว)
+  // Reference the record by RecordID, not by the row number sent from the client — rows shift all the time
+  // (if someone deleted an earlier row → that same row number now points to a different record = wrong row deleted)
   const lock = LockService.getScriptLock();
   try {
-    if (!lock.tryLock(10000)) throw new Error('ระบบกำลังประมวลผล กรุณาลองใหม่');
+    if (!lock.tryLock(10000)) throw new Error('System is busy, please try again');
     const caller = requireUser_(callerUserId);
-    if (!recordId || typeof recordId !== 'string') throw new Error('ไม่พบ record');
+    if (!recordId || typeof recordId !== 'string') throw new Error('Record not found');
 
     const record = readSheet_(sheet).find(r => String(r.RecordID) === recordId);
-    if (!record) throw new Error('ไม่พบ record');
+    if (!record) throw new Error('Record not found');
 
-    // teacher ลบได้แค่ของตัวเอง
+    // a teacher can delete only their own records
     if (caller.Role === 'teacher' && String(record.TeacherUserID) !== String(caller.UserID)) {
-      throw new Error('ไม่มีสิทธิ์ลบ');
+      throw new Error('No permission to delete');
     }
-    // admin/supervisor ลบได้หมด
+    // admin/supervisor can delete anything
 
-    sheet.deleteRow(record.__rowIndex); // row index จากการอ่านสด ภายใต้ lock
+    sheet.deleteRow(record.__rowIndex); // row index from the fresh read, taken under the lock
     return { ok: true };
   } catch (err) {
     return { ok: false, message: err.message };
@@ -35,34 +35,34 @@ function deleteRecord(callerUserId, recordId) {
 }
 
 function requireUser_(callerUserId) {
-  if (!callerUserId) throw new Error('ไม่ได้ login');
+  if (!callerUserId) throw new Error('Not logged in');
   const user = findUserById_(callerUserId);
-  if (!user) throw new Error('ไม่พบผู้ใช้');
-  if (user.Active === false || user.Active === 'false') throw new Error('บัญชีถูกปิดใช้งาน');
+  if (!user) throw new Error('User not found');
+  if (user.Active === false || user.Active === 'false') throw new Error('Account is disabled');
   return user;
 }
 
 function requireRole_(user, allowedRoles) {
   if (!Array.isArray(allowedRoles)) allowedRoles = [allowedRoles];
-  if (!allowedRoles.includes(user.Role)) throw new Error('ไม่มีสิทธิ์');
+  if (!allowedRoles.includes(user.Role)) throw new Error('No permission');
 }
 ```
 
 ---
 
-## Rule #2: ยอมรับว่า `callerUserId` ปลอมได้ — สำหรับ stake สูงต้องใช้ session token
+## Rule #2: Accept that `callerUserId` can be faked — for high-stakes work use a session token
 
-**Limit ของ pattern token-as-userId:** client เก็บ userId ใน localStorage — ใครก็แก้ใส่ userId ของ admin ได้
+**Limit of the token-as-userId pattern:** the client stores the userId in localStorage — anyone can edit it and drop in an admin's userId
 
-### สำหรับงาน internal / low-stake → OK
+### For internal / low-stakes work → OK
 
-### สำหรับงาน sensitive → ใช้ session token + expiry
+### For sensitive work → use a session token + expiry
 
 ```javascript
-// Login: server สร้าง token, เก็บใน Session sheet พร้อม userId + expiry
+// Login: the server creates the token and stores it in the Session sheet with userId + expiry
 function login(username, password) {
   const user = verifyPassword_(username, password);
-  if (!user) return { ok: false, message: 'username/password ผิด' };
+  if (!user) return { ok: false, message: 'Wrong username/password' };
 
   const token = Utilities.getUuid();
   const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hr
@@ -75,43 +75,43 @@ function login(username, password) {
   return { ok: true, token: token, userId: user.UserID, role: user.Role };
 }
 
-// ทุก server function รับ token แทน userId
+// every server function takes a token instead of a userId
 function requireSession_(token) {
-  if (!token) throw new Error('ไม่ได้ login');
+  if (!token) throw new Error('Not logged in');
   const sessions = readSheet_(getSessionSheet_());
   const s = sessions.find(r => r.Token === token);
-  if (!s) throw new Error('session หมดอายุ');
-  if (Number(s.ExpiresAt) < Date.now()) throw new Error('session หมดอายุ');
+  if (!s) throw new Error('Session expired');
+  if (Number(s.ExpiresAt) < Date.now()) throw new Error('Session expired');
   return findUserById_(s.UserID);
 }
 ```
 
-Trade-off: เพิ่ม sheet write ทุก login + ต้องล้าง expired session ผ่าน trigger
+Trade-off: one extra sheet write per login + you must purge expired sessions with a trigger
 
 ---
 
-## Rule #3: เก็บ password/PIN เป็น hash ที่มี salt + pepper — ห้ามวน HMAC เป็นพัน ๆ รอบ
+## Rule #3: Store passwords/PINs as salted + peppered hashes — never iterate HMAC thousands of times
 
-**Why:** ใน GAS ไม่มี `crypto.subtle` และ `Utilities.computeHmacSha256Signature` ช้ามาก (หลายมิลลิวินาทีต่อครั้ง) — วน 10,000 รอบแบบ PBKDF2 ทำให้กดยืนยัน PIN แล้วค้าง "กำลังตรวจสอบ…" เกือบหนึ่งนาที (เจอจริงในแอปบันทึกรายรับรายจ่าย) และกับ PIN 4–6 หลัก การวนหลายรอบก็ไม่ช่วยอะไรถ้าใครได้ hash ไป (ลองครบทุกค่าได้ในไม่กี่วินาทีอยู่ดี) สิ่งที่กันได้จริงคือ **pepper ที่ไม่ได้อยู่ในชีต** และ **จำกัดจำนวนครั้งที่ลองผิด**
+**Why:** GAS has no `crypto.subtle`, and `Utilities.computeHmacSha256Signature` is slow (several milliseconds per call) — 10,000 PBKDF2-style rounds leaves the PIN confirm button stuck on "Checking…" for almost a minute (seen for real in an expense-tracking app), and for a 4–6 digit PIN extra rounds buy nothing once someone has the hash (they can try every value in seconds anyway). What actually helps is a **pepper that is not in the sheet** and **limiting the number of failed attempts**
 
-### ✗ Bad — stretching ใน GAS
+### ✗ Bad — stretching in GAS
 
 ```javascript
 function hashPassword_(password, salt) {
   let bytes = Utilities.newBlob(password).getBytes();
   const saltBytes = Utilities.newBlob(salt).getBytes();
-  for (let i = 0; i < 10000; i++) {            // ✗ ช้าเกือบนาทีต่อการ login หนึ่งครั้ง
+  for (let i = 0; i < 10000; i++) {            // ✗ nearly a minute per single login
     bytes = Utilities.computeHmacSha256Signature(bytes, saltBytes);
   }
   return Utilities.base64Encode(bytes);
 }
 ```
 
-### ✓ Good — HMAC ครั้งเดียว: key = pepper ใน Script Properties, ข้อมูล = salt + password
+### ✓ Good — one HMAC call: key = pepper in Script Properties, data = salt + password
 
 ```javascript
-// pepper สร้างครั้งเดียวตอน setup (ใน LockService กันสองคนสร้างพร้อมกันแล้วทับกัน) — อยู่ใน Script Properties
-// เท่านั้น ไม่อยู่ในชีต คนที่ได้ชีตไปทั้งไฟล์ยังเดา hash ไม่ได้
+// the pepper is created once at setup (inside LockService so two people creating it at once don't overwrite each other) — it lives in Script Properties
+// only, never in the sheet: someone who gets the whole spreadsheet still cannot guess the hash
 function pepper_() {
   const props = PropertiesService.getScriptProperties();
   let p = props.getProperty('AUTH_PEPPER');
@@ -132,7 +132,7 @@ function pepper_() {
 
 function hashPassword_(password, salt) {
   const sig = Utilities.computeHmacSha256Signature(salt + ':' + password, pepper_());
-  return Utilities.base64Encode(sig);               // ✓ ครั้งเดียว หลักมิลลิวินาที
+  return Utilities.base64Encode(sig);               // ✓ one call, sub-millisecond
 }
 
 function generateSalt_() {
@@ -146,52 +146,52 @@ const hash = hashPassword_(password, salt);
 
 // On login
 const expected = hashPassword_(inputPassword, user.PasswordSalt);
-if (expected !== user.PasswordHash) throw new Error('password ผิด');
+if (expected !== user.PasswordHash) throw new Error('Wrong password');
 ```
 
-**ต้องมีคู่กัน:** จำกัดจำนวนครั้งที่ลองผิด — นับใน CacheService ต่อ user (เช่น ผิด 5 ครั้งใน 15 นาที → ปฏิเสธจนกว่าจะหมดเวลา) เพราะกับ PIN สั้น ๆ นี่คือด่านจริง ไม่ใช่ความช้าของ hash
+**Must be paired with:** limit the number of failed attempts — count per user in CacheService (e.g. 5 misses in 15 minutes → reject until the window expires), because with a short PIN this is the real defense, not hash slowness
 
-- ถ้าจำเป็นต้อง stretching จริง ๆ (รหัสผ่านยาวของผู้ดูแล) ไม่เกิน 100–300 รอบ และวัดเวลาจริงใน GAS ก่อนใช้
-- ห้ามเก็บ PIN/รหัสผ่านเป็น plain text และห้ามเก็บ pepper ในชีตหรือในโค้ด
+- If you genuinely need stretching (long admin passwords), cap it at 100–300 rounds and measure the real time in GAS first
+- Never store PINs/passwords as plain text, and never keep the pepper in a sheet or in the code
 
 ---
 
-## Rule #4: oauthScopes ใน appsscript.json — ขออันที่ใช้จริง
+## Rule #4: oauthScopes in appsscript.json — request only what you use
 
-**Why:** ขอเกินจำเป็น → user เห็นแจ้งเตือนน่ากลัวตอน authorize + audit fail ใน enterprise
+**Why:** requesting more than necessary → scary prompts at authorize time + failed audits in enterprise
 
 ```json
 {
   "oauthScopes": [
-    "https://www.googleapis.com/auth/spreadsheets",          // อ่าน/เขียน Sheet
-    "https://www.googleapis.com/auth/drive",                 // ใช้ DriveApp (createFile/createFolder ฯลฯ) — DriveApp ไม่รับ drive.file
+    "https://www.googleapis.com/auth/spreadsheets",          // read/write Sheets
+    "https://www.googleapis.com/auth/drive",                 // for DriveApp (createFile/createFolder etc.) — DriveApp does not accept drive.file
     "https://www.googleapis.com/auth/script.external_request",  // UrlFetch
-    "https://www.googleapis.com/auth/userinfo.email"         // ดู email user
+    "https://www.googleapis.com/auth/userinfo.email"         // read the user email
   ]
 }
 ```
 
-**Scope hierarchy (จาก narrow → broad):**
-- `drive.file` — เฉพาะไฟล์ที่ script สร้าง / user เลือกผ่าน picker — **ใช้กับ `DriveApp` ไม่ได้** ใช้ได้เฉพาะตอนเรียก Drive REST API เอง (`UrlFetchApp` + `ScriptApp.getOAuthToken()`), Advanced Drive Service หรือ Google Picker
-- `drive.readonly` — อ่านทั้ง Drive ← ใช้เมื่อ `DriveApp` แค่อ่าน (`getFileById`, `getFolderById`)
-- `drive` — full access ← **จำเป็นทุกครั้งที่ `DriveApp` เขียน** (`createFile`, `createFolder`, `Folder.createFile`, `setSharing`, `setTrashed`)
+**Scope hierarchy (narrow → broad):**
+- `drive.file` — only files the script created / files the user picked with a picker — **cannot be used with `DriveApp`**, only when you call the Drive REST API yourself (`UrlFetchApp` + `ScriptApp.getOAuthToken()`), with Advanced Drive Service, or with Google Picker
+- `drive.readonly` — read the whole Drive ← use when `DriveApp` only reads (`getFileById`, `getFolderById`)
+- `drive` — full access ← **required every time `DriveApp` writes** (`createFile`, `createFolder`, `Folder.createFile`, `setSharing`, `setTrashed`)
 
-**DriveApp กับ `drive.file` (เจอจริง):** ประกาศ `drive.file` แล้วเรียก `DriveApp.createFolder()` → runtime error `สิทธิ์ที่ระบุไว้ไม่เพียงพอที่จะเรียกใช้ DriveApp.createFolder สิทธิ์ที่จำเป็นคือ https://www.googleapis.com/auth/drive` (อังกฤษ: "The script does not have permission to perform that action. Required permissions: https://www.googleapis.com/auth/drive") — reference ของ `DriveApp` ระบุ scope ของ `createFile` / `createFolder` ไว้แค่ `auth/drive` ตัวเดียว ถ้าใช้ `DriveApp` เขียนไฟล์ ให้ประกาศ `drive` ไปเลย อย่าเดา `drive.file` เพราะดูแคบกว่า
+**DriveApp vs `drive.file` (seen for real):** declare `drive.file`, then call `DriveApp.createFolder()` → runtime error `The permissions specified are insufficient to call DriveApp.createFolder; the required permission is https://www.googleapis.com/auth/drive` (in English: "The script does not have permission to perform that action. Required permissions: https://www.googleapis.com/auth/drive") — the `DriveApp` reference lists only `auth/drive` as the scope for `createFile` / `createFolder`. If you use `DriveApp` to write files, just declare `drive`; don't guess `drive.file` because it looks narrower
 
 ---
 
-## Rule #5: validate input ที่ boundary — อย่าเชื่อ payload
+## Rule #5: Validate input at the boundary — never trust the payload
 
 ```javascript
 function saveRecord(callerUserId, payload) {
   // type + presence checks
-  if (!payload || typeof payload !== 'object') throw new Error('payload ผิด');
-  if (!payload.folderId || typeof payload.folderId !== 'string') throw new Error('ไม่มี folderId');
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid payload');
+  if (!payload.folderId || typeof payload.folderId !== 'string') throw new Error('Missing folderId');
   const total = parseInt(payload.totalStudents);
-  if (isNaN(total) || total < 0 || total > 1000) throw new Error('จำนวนนักเรียนไม่ถูกต้อง');
+  if (isNaN(total) || total < 0 || total > 1000) throw new Error('Invalid student count');
 
-  // string length cap (กัน 1MB string)
-  if (String(payload.topic || '').length > 500) throw new Error('หัวข้อยาวเกิน 500 ตัวอักษร');
+  // string length cap (guards against 1MB strings)
+  if (String(payload.topic || '').length > 500) throw new Error('Topic is longer than 500 characters');
 
   // ... mutation ...
 }
@@ -199,9 +199,9 @@ function saveRecord(callerUserId, payload) {
 
 ---
 
-## Rule #6: ห้าม echo input กลับ HTML ไม่ escape
+## Rule #6: Never echo input back into HTML unescaped
 
-ถ้าใช้ `HtmlService.createTemplate()`:
+If you use `HtmlService.createTemplate()`:
 
 ### ✗ Bad
 
@@ -215,14 +215,14 @@ function saveRecord(callerUserId, payload) {
 <div><?!= encodeHtml(safeValue) ?></div>
 ```
 
-หรือ render ทุกอย่างใน client (Alpine/Vue) แล้ว server คืน JSON เท่านั้น — XSS ขึ้นกับ framework ฝั่ง client (Alpine `x-text` escape อัตโนมัติ)
+Or render everything on the client (Alpine/Vue) and have the server return JSON only — then XSS depends on the client framework (Alpine's `x-text` escapes automatically)
 
 ---
 
-## Rule #7: ห้าม commit OAuth token / API key ใน source
+## Rule #7: Never commit OAuth tokens / API keys in source
 
-`.clasprc.json` — ในโฮม dir, gitignore แล้ว แต่บางคน export มาวางใน repo
-API key (LINE, OpenAI, ฯลฯ) → ใส่ใน **PropertiesService.getScriptProperties()** หรือ Config sheet ที่ไม่ถูก share
+`.clasprc.json` — it lives in the home dir and is gitignored, but people still export it into the repo
+API keys (LINE, OpenAI, etc.) → put them in **PropertiesService.getScriptProperties()** or a Config sheet that is not shared
 
 ```javascript
 function getApiKey_() {
@@ -230,11 +230,11 @@ function getApiKey_() {
 }
 ```
 
-ตั้งค่าผ่าน Apps Script editor: **Project Settings → Script properties → Add property**
+Set it via the Apps Script editor: **Project Settings → Script properties → Add property**
 
 ---
 
-## Rule #8: log access ของ sensitive operation
+## Rule #8: Log access to sensitive operations
 
 ```javascript
 function deleteUser(callerUserId, targetUserId) {
@@ -246,7 +246,7 @@ function deleteUser(callerUserId, targetUserId) {
     Actor: caller.UserID,
     Action: 'deleteUser',
     Target: targetUserId,
-    IP: '-', // GAS ไม่มี request IP
+    IP: '-', // GAS has no request IP
   });
 }
 ```

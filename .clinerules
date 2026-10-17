@@ -18,7 +18,7 @@ Trigger detection — apply when:
 4. Cache user lookups via `CacheService.getScriptCache()` with explicit invalidation
 5. `LockService.getScriptLock()` around concurrent mutations + try/finally release
 6. Admin-editable values in Config sheet, secrets in Script Properties — never hardcoded
-7. Thai user-facing messages, English Logger.log
+7. User-facing messages in the user's language, English Logger.log
 8. Log every RPC boundary (console.log client + Logger.log server)
 9. Force text format for leading-zero numeric fields (phone, ID, postal code)
 10. Recompute critical values server-side — never trust client

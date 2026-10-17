@@ -1,33 +1,33 @@
 # Project Structure
 
-## Rule: ใช้ clasp + แยกไฟล์ตาม domain ไม่ใช่ตาม type
+## Rule: use clasp + split files by domain, not by type
 
-**Why:** Apps Script editor บนเว็บแสดงทุกไฟล์เป็น flat list — ถ้าตั้งชื่อไฟล์ตาม domain (`Users.js`, `Records.js`, `PdfGen.js`) จะหาง่ายกว่า `models.js` / `controllers.js`
+**Why:** The web-based Apps Script editor shows every file as a flat list — naming files after the domain (`Users.js`, `Records.js`, `PdfGen.js`) is far easier to find than `models.js` / `controllers.js`
 
-### ✗ Bad — ทุกอย่างใน Code.gs ไฟล์เดียว
+### ✗ Bad — everything in a single Code.gs
 
 ```
-Code.gs   (2000 บรรทัด)
+Code.gs   (2000 lines)
 ```
 
-### ✓ Good — split ตาม domain
+### ✓ Good — split by domain
 
 ```
 project/
 ├── .clasp.json
 ├── appsscript.json
-├── รหัส.js           ← bootstrap + schema + getConfig_ + utility ที่ใช้ทั่ว
-├── Users.js           ← login, requireUser_, requireRole_, password
-├── Records.js         ← CRUD record/folder
-├── Signature.js       ← signature upload/delete
-├── PdfGen.js          ← PDF template + export
-└── Index.html         ← single-page web app
+├── Code.gs           ← bootstrap + schema + getConfig_ + shared utilities
+├── Users.js          ← login, requireUser_, requireRole_, password
+├── Records.js        ← record/folder CRUD
+├── Signature.js      ← signature upload/delete
+├── PdfGen.js         ← PDF template + export
+└── Index.html        ← single-page web app
 ```
 
-## Rule: .clasp.json ต้อง gitignore `*.json` ที่มี secret
+## Rule: `.clasp.json` must be committed, but secret-bearing `*.json` must not
 
-`.clasp.json` มี `scriptId` (ไม่ secret) — commit ได้
-`.clasprc.json` ในโฮม dir มี OAuth token — **อย่า commit เด็ดขาด**
+`.clasp.json` holds `scriptId` (not a secret) — safe to commit
+`.clasprc.json` in the home directory holds the OAuth token — **never commit it**
 
 ```
 # .gitignore
@@ -35,7 +35,7 @@ node_modules/
 .clasprc.json
 ```
 
-## Rule: appsscript.json บังคับใส่ timezone + runtimeVersion: V8
+## Rule: appsscript.json must force a timezone + runtimeVersion: V8
 
 ```json
 {
@@ -53,21 +53,21 @@ node_modules/
 }
 ```
 
-**Why V8:** รองรับ ES6+ (const/let, arrow, template literals, spread) — Rhino runtime (เก่า) ไม่รองรับ
+**Why V8:** it supports ES6+ (const/let, arrow functions, template literals, spread) — the old Rhino runtime does not
 
-**`executeAs: USER_DEPLOYING`** = web app รันด้วยสิทธิ์ของคนที่ deploy → user ที่เปิดเว็บไม่ต้อง grant access เอง — แต่ทุก mutation ต้อง guard role เอง (ดู `rules/security.md`)
+**`executeAs: USER_DEPLOYING`** = the web app runs with the permissions of the deployer → users who open the page never have to grant access themselves — but every mutation must still guard the role (see `rules/security.md`)
 
-**`access: ANYONE_ANONYMOUS`** เหมาะกับระบบที่มี login ของตัวเอง (session token) — ถ้า user ทุกคนมี Google account ใน domain เดียวกัน ใช้ `DOMAIN` จะปลอดภัยกว่า
+**`access: ANYONE_ANONYMOUS`** fits systems that implement their own login (session token) — if every user has a Google account in the same domain, `DOMAIN` is safer
 
-**Scope ใน template นี้เริ่มจากแคบที่สุด** — ยังไม่มี scope ของ Drive เพราะ template ไม่ได้ใช้ Drive เพิ่มเมื่อใช้จริง: `DriveApp` ที่เขียนไฟล์ (`createFile`, `createFolder`) ต้องใช้ `drive` เต็ม เพราะ `DriveApp` ไม่รับ `drive.file` ส่วน `DriveApp` ที่แค่อ่านใช้ `drive.readonly` (เหตุผลใน `rules/security.md` Rule #4)
+**Scopes in this template start at the narrowest possible** — there is no Drive scope yet because the template does not use Drive as shipped: `DriveApp` calls that write files (`createFile`, `createFolder`) require the full `drive` scope, because `DriveApp` does not accept `drive.file`, while read-only `DriveApp` usage only needs `drive.readonly` (reasoning in `rules/security.md` Rule #4)
 
-## Rule: ห้าม commit `appsscript.json` ที่มี `webapp.deploymentId` หรือ `scriptId` แปลก ๆ
+## Rule: never commit an `appsscript.json` that carries a `webapp.deploymentId` or a foreign `scriptId`
 
-ใช้ template เปล่า ๆ — ค่า deployment-specific อยู่ใน clasp deploy output
+Keep the template blank — deployment-specific values belong in the clasp deploy output
 
 ## Rule: file naming
 
-- bootstrap/main → `รหัส.js` (default name ของ Apps Script ภาษาไทย) หรือ `Main.js`
-- ตาม domain → PascalCase `Users.js`, `Records.js`
-- ตัวช่วย global → `Utils.js`
-- ห้ามขึ้นต้นเลข, ห้ามมีช่องว่าง (clasp pull/push จะเพี้ยน)
+- bootstrap/main → `Code.gs` (the Apps Script default name) or `Main.js`
+- per domain → PascalCase `Users.js`, `Records.js`
+- global helpers → `Utils.js`
+- no leading digits, no spaces (clasp pull/push will mangle them)

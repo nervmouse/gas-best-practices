@@ -1,53 +1,53 @@
-# onOpen Menu — Custom Menu ใน Sheets
+# onOpen Menu — Custom Menus in Sheets
 
-## Rule #1: ใช้ `onOpen()` เป็น simple trigger — ไม่ต้องสร้าง installable trigger
+## Rule #1: use `onOpen()` as a simple trigger — no installable trigger needed
 
 ```javascript
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('🎓 Admin')
-    .addItem('▶ Setup โปรเจ็ค', 'setupSandbox')
-    .addItem('📝 ดู Config', 'showConfig')
+    .addItem('▶ Setup project', 'setupSandbox')
+    .addItem('📝 Show Config', 'showConfig')
     .addSeparator()
-    .addItem('🧹 ล้าง Output sheet', 'clearOutput')
-    .addItem('🧹 ล้าง Logs sheet', 'clearLogs')
+    .addItem('🧹 Clear Output sheet', 'clearOutput')
+    .addItem('🧹 Clear Logs sheet', 'clearLogs')
     .addSeparator()
-    .addItem('⚙ Re-setup (reset ทุก sheet)', 'setupSandbox')
+    .addItem('⚙ Re-setup (reset every sheet)', 'setupSandbox')
     .addToUi();
 }
 ```
 
-**Limit ของ simple trigger:** ห้ามใช้ service ที่ต้อง authorization (UrlFetch, Drive ของ user อื่น, MailApp)
-ถ้าต้องใช้ → ทำเป็น installable trigger ที่ user authorize ครั้งแรก
+**Limit of a simple trigger:** you cannot use services that require authorization (UrlFetch, another user's Drive, MailApp)
+If you need them → make it an installable trigger that the user authorizes once
 
 ---
 
-## Rule #2: เมนูควรมีหมวด (separator) — กลุ่มฟังก์ชันที่เกี่ยวข้อง
+## Rule #2: group menu items with separators — cluster related functions
 
 ```javascript
 ui.createMenu('🎓 Sandbox')
-  .addItem('▶ Hello World', 'helloWorld')          // เริ่มต้น
-  .addItem('📝 Show Config', 'showConfig')         // อ่านอย่างเดียว
+  .addItem('▶ Hello World', 'helloWorld')          // starting point
+  .addItem('📝 Show Config', 'showConfig')         // read-only
   .addSeparator()
-  .addItem('🧹 Clear Output', 'clearOutput')       // ลบ — มีผลข้างเคียง
+  .addItem('🧹 Clear Output', 'clearOutput')       // delete — has side effects
   .addItem('🧹 Clear Logs', 'clearLogs')
   .addSeparator()
   .addItem('⚙ Re-setup', 'setupSandbox')           // destructive
   .addToUi();
 ```
 
-ลำดับ: **ใช้บ่อย → ใช้น้อย → ลบ/รีเซ็ต**
+Order: **frequently used → rarely used → delete/reset**
 
 ---
 
-## Rule #3: destructive action — confirm ก่อนรัน
+## Rule #3: destructive action — confirm before running it
 
 ```javascript
 function setupSandbox() {
   const ui = SpreadsheetApp.getUi();
   const resp = ui.alert(
-    'Re-setup โปรเจ็ค',
-    'ข้อมูลใน sheet Output และ Logs จะถูกลบทั้งหมด ยืนยันหรือไม่?',
+    'Re-setup project',
+    'All data in the Output and Logs sheets will be deleted. Continue?',
     ui.ButtonSet.YES_NO
   );
   if (resp !== ui.Button.YES) return;
@@ -57,46 +57,46 @@ function setupSandbox() {
 
 ---
 
-## Rule #4: alert ที่ user ต้องรู้เท่านั้น — ห้าม alert ทุกขั้นตอน
+## Rule #4: alert only what the user must know — never alert at every step
 
 ### ✗ Bad
 
 ```javascript
 function doStuff() {
-  ui.alert('เริ่มต้น...');     // ไม่จำเป็น
+  ui.alert('Starting...');     // unnecessary
   step1();
-  ui.alert('Step 1 เสร็จ');     // รบกวน
+  ui.alert('Step 1 done');     // annoying
   step2();
-  ui.alert('เสร็จแล้ว!');
+  ui.alert('Done!');
 }
 ```
 
-### ✓ Good — alert เฉพาะตอนจบ + ใช้ toast สำหรับสถานะ
+### ✓ Good — alert only at the end + use a toast for status
 
 ```javascript
 function doStuff() {
   const ss = SpreadsheetApp.getActive();
-  ss.toast('กำลังประมวลผล...', '⏳');
+  ss.toast('Processing...', '⏳');
   step1();
   step2();
-  ss.toast('เสร็จแล้ว', '✅', 3);
-  // ใช้ alert เฉพาะถ้า user ต้องตัดสินใจอะไรต่อ
+  ss.toast('Done', '✅', 3);
+  // use an alert only if the user still has to decide something
 }
 ```
 
-`ss.toast(message, title, seconds)` — มุมขวาล่าง ไม่ block UI
+`ss.toast(message, title, seconds)` — bottom-right corner, does not block the UI
 
 ---
 
-## Rule #5: ถ้า function ที่เรียกอาจไม่มี UI context — wrap alert ใน try/catch
+## Rule #5: if the calling function may have no UI context — wrap the alert in try/catch
 
 ```javascript
 function setupSandbox() {
   // ... setup ...
   try {
-    SpreadsheetApp.getUi().alert('✅ Setup สำเร็จ!');
+    SpreadsheetApp.getUi().alert('✅ Setup complete!');
   } catch (e) {
-    // ถ้ารันผ่าน trigger / clasp run / ไม่มี UI → ข้าม alert
+    // running via a trigger / clasp run / no UI → skip the alert
     Logger.log('Setup done (no UI).');
   }
 }
@@ -104,7 +104,7 @@ function setupSandbox() {
 
 ---
 
-## Rule #6: เมนูแยกตาม role — ใช้ user email ตรวจ
+## Rule #6: split the menu by role — check the user email
 
 ```javascript
 function onOpen() {
@@ -125,11 +125,11 @@ function onOpen() {
 }
 ```
 
-**Caveat:** simple trigger `onOpen` รันด้วยสิทธิ์ของ user ที่เปิด — `Session.getActiveUser().getEmail()` ได้ email user
+**Caveat:** a simple trigger `onOpen` runs with the rights of the user who opened the file — `Session.getActiveUser().getEmail()` returns that user's email
 
 ---
 
-## Rule #7: sub-menu สำหรับเมนูที่ลึก
+## Rule #7: sub-menus for deep menu trees
 
 ```javascript
 ui.createMenu('🎓 Admin')
@@ -150,9 +150,9 @@ ui.createMenu('🎓 Admin')
 
 ---
 
-## Rule #8: เมนูชื่อสั้น — emoji + คำเดียว
+## Rule #8: short menu names — emoji + one word
 
 - ✅ `🎓 Sandbox`, `📊 Reports`, `⚙ Settings`
 - ❌ `🎓 Sandbox Management Console`, `📊 View All Reports for This Project`
 
-GAS menu bar แคบ — ชื่อยาวเปลือง space + อ่านยาก
+The GAS menu bar is narrow — long names waste space and are hard to read

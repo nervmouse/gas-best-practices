@@ -1,24 +1,24 @@
-# Long-running Jobs (ทะลุ 6-minute limit)
+# Long-running Jobs (exceeding the 6-minute limit)
 
-## Rule #1: งานเกิน ~5 นาที ต้องออกแบบเป็น batch + resume — ไม่ใช่หวังว่าจะรันทัน
+## Rule #1: A job over ~5 minutes must be designed as batch + resume — never hope it finishes in time
 
-**Why:** GAS ตัด execution ที่ 6 นาที (30 วินาทีสำหรับ custom function) แบบไม่มี warning — งาน process 10,000 แถวที่ "เคยรันทัน" จะพังทันทีที่ข้อมูลโตขึ้น และพังกลางคัน = ข้อมูลค้างครึ่ง ๆ กลาง ๆ
+**Why:** GAS cuts an execution at 6 minutes (30 seconds for a custom function) with no warning — a job processing 10,000 rows that "used to finish in time" breaks as soon as the data grows, and breaking halfway = half-written data
 
-**หลักออกแบบ:** ทุก iteration ต้อง idempotent (รันซ้ำแถวเดิมแล้วไม่เสียหาย) + เก็บ checkpoint ว่าทำถึงไหน
+**Design principle:** every iteration must be idempotent (re-running the same row does no harm) + store a checkpoint of how far it got
 
 ---
 
-## Rule #2: checkpoint pattern — เก็บตำแหน่งใน Script Properties + ตั้ง continuation trigger
+## Rule #2: checkpoint pattern — keep the position in Script Properties + set a continuation trigger
 
-### ✓ Good — โครงหลักที่ใช้ได้กับทุกงาน batch
+### ✓ Good — a skeleton that works for any batch job
 
 ```javascript
-const TIME_BUDGET_MS = 4.5 * 60 * 1000; // เผื่อ margin จาก limit 6 นาที
+const TIME_BUDGET_MS = 4.5 * 60 * 1000; // margin against the 6-minute limit
 
 function processAllRecords() {
   const props = PropertiesService.getScriptProperties();
   const start = Date.now();
-  let cursor = parseInt(props.getProperty('JOB_CURSOR') || '2'); // แถวแรกของ data
+  let cursor = parseInt(props.getProperty('JOB_CURSOR') || '2'); // first data row
 
   const sh = SpreadsheetApp.openById(getConfig_('SPREADSHEET_ID')).getSheetByName('Records');
   const lastRow = sh.getLastRow();
@@ -31,18 +31,18 @@ function processAllRecords() {
       Logger.log('[job] checkpoint at row ' + cursor + ' — continuing in next run');
       return;
     }
-    processOneRow_(sh, cursor); // ต้อง idempotent
+    processOneRow_(sh, cursor); // must be idempotent
     cursor++;
   }
 
-  // จบงาน — ล้าง state + trigger
+  // job finished — clear state + trigger
   props.deleteProperty('JOB_CURSOR');
   clearContinuation_('processAllRecords');
   Logger.log('[job] done ' + (lastRow - 1) + ' rows');
 }
 
 function scheduleContinuation_(handlerName) {
-  clearContinuation_(handlerName); // กัน trigger ซ้อน (ดู rules/triggers.md Rule #1)
+  clearContinuation_(handlerName); // prevent duplicate triggers (see rules/triggers.md Rule #1)
   ScriptApp.newTrigger(handlerName).timeBased().after(60 * 1000).create();
 }
 
@@ -53,32 +53,32 @@ function clearContinuation_(handlerName) {
 }
 ```
 
-**จุดตาย 3 จุดที่ห้ามพลาด:**
-1. **เผื่อ margin** — ตัดที่ 4.5 นาที ไม่ใช่ 5.9 (การเขียน checkpoint + สร้าง trigger ก็กินเวลา)
-2. **ลบ trigger เมื่อจบ** — ไม่งั้น trigger ค้างรันเปล่า ๆ ทุกนาทีจนเต็ม quota
-3. **iteration ต้อง idempotent** — script อาจตายหลัง process แถวแล้วแต่ก่อนเขียน checkpoint → แถวนั้นจะถูกรันซ้ำ
+**3 landmines you must not miss:**
+1. **Leave a margin** — cut off at 4.5 minutes, not 5.9 (writing the checkpoint + creating the trigger also take time)
+2. **Delete the trigger when done** — otherwise it keeps running empty every minute until the quota is gone
+3. **The iteration must be idempotent** — the script may die after processing a row but before writing the checkpoint → that row runs again
 
 ---
 
-## Rule #3: อย่า process ใน RPC ที่ user รอ — คืน "รับงานแล้ว" แล้วทำใน background
+## Rule #3: Never process inside an RPC the user is waiting on — return "accepted" and work in the background
 
-**Why:** `google.script.run` ก็โดน limit 6 นาทีเหมือนกัน และ user ไม่ควรจ้องหน้าจอหมุน 5 นาที
+**Why:** `google.script.run` hits the same 6-minute limit, and the user should not stare at a spinning screen for 5 minutes
 
 ### ✓ Good — submit + poll status
 
 ```javascript
-// RPC: รับคำสั่ง ตอบทันที
+// RPC: take the command, reply immediately
 function startExportJob(callerUserId) {
   const caller = requireUser_(callerUserId);
   PropertiesService.getScriptProperties().setProperties({
     'EXPORT_STATUS': 'running',
     'EXPORT_PROGRESS': '0',
   });
-  scheduleContinuation_('runExportJob'); // เริ่มภายใน ~1 นาที
-  return { ok: true, message: 'เริ่มประมวลผลแล้ว ระบบจะแจ้งเมื่อเสร็จ' };
+  scheduleContinuation_('runExportJob'); // starts within ~1 minute
+  return { ok: true, message: 'Processing started — you will be notified when it is done' };
 }
 
-// RPC: client poll ทุก 5 วิ
+// RPC: the client polls every 5s
 function getExportStatus(callerUserId) {
   const p = PropertiesService.getScriptProperties();
   return {
@@ -90,16 +90,16 @@ function getExportStatus(callerUserId) {
 }
 ```
 
-งานที่จบแล้วควรแจ้งช่องทางอื่นด้วย (อีเมล/LINE — ดู `rules/email-notifications.md`) เผื่อ user ปิดหน้าเว็บไปแล้ว
+A finished job should also notify another channel (email / LINE — see `rules/email-notifications.md`), in case the user already closed the page
 
 ---
 
-## Rule #4: ลด work ต่อ iteration ก่อนคิดเรื่อง batch
+## Rule #4: Reduce work per iteration before thinking about batching
 
-**Why:** งานส่วนใหญ่ที่ "เกิน 6 นาที" จริง ๆ คือ N+1 round-trip — แก้ตาม `rules/spreadsheet-ops.md` Rule #1 (bulk read) + เขียนแบบ batch แล้วมักเหลือไม่ถึงนาที
+**Why:** most jobs that "exceed 6 minutes" are really N+1 round-trips — fix them per `rules/spreadsheet-ops.md` Rule #1 (bulk read) + write in batch and they usually drop well under a minute
 
-Checklist ก่อนทำ continuation pattern:
-- [ ] อ่าน sheet ครั้งเดียวด้วย `getDataRange().getValues()` แล้วหรือยัง
-- [ ] เขียนกลับเป็น batch (`setValues` ช่วงที่ไม่มี merge) แทน per-cell ได้ไหม
-- [ ] fetch ภายนอกใช้ `fetchAll` แล้วหรือยัง (`rules/urlfetch-external-api.md` Rule #3)
-- [ ] มี timing log บอกว่า step ไหนกินเวลา (`rules/testing-debugging.md` Rule #9)
+Checklist before building a continuation pattern:
+- [ ] Did you read the sheet once with `getDataRange().getValues()`?
+- [ ] Can you write back in a batch (`setValues` over a range with no merged cells) instead of per cell?
+- [ ] Are external fetches using `fetchAll`? (`rules/urlfetch-external-api.md` Rule #3)
+- [ ] Is there timing log showing which step is expensive? (`rules/testing-debugging.md` Rule #9)

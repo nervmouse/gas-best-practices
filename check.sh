@@ -9,7 +9,7 @@ echo "========================="
 
 if [ ! -d "$DEST" ]; then
   echo "✗ Not installed"
-  echo "  Install: curl -fsSL https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/install.sh | bash"
+  echo "  Install: curl -fsSL https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/install.sh | bash"
   exit 1
 fi
 

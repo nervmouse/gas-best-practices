@@ -1,43 +1,43 @@
 # External Frontend (GitHub Pages / Netlify / Vercel) + GAS Backend
 
-**สารบัญ** (ไฟล์ยาว — ข้ามไป rule ที่เกี่ยวกับงานตรงหน้าได้เลย):
+**Table of contents** (long file — jump straight to the rule that matches your task):
 
-| Rule | เรื่อง |
+| Rule | Topic |
 |---|---|
-| Context | ทำไมต้องแยก frontend ออกจาก GAS + architecture |
-| #1 | POST `text/plain` หลีกเลี่ยง CORS preflight |
+| Context | why the frontend must be separated from GAS + architecture |
+| #1 | POST `text/plain` to avoid the CORS preflight |
 | #2 | deploy `Execute as: Me` + `Anyone (even anonymous)` |
-| #3 | ทุก request ส่ง auth token ใน payload |
+| #3 | send an auth token in the payload on every request |
 | #4 | camera capture pattern |
-| #5 | บีบรูปก่อนส่ง |
-| #6 | ห้ามใส่ secret ใน frontend code |
-| #7 | handle redirect ของ GAS URL |
+| #5 | compress the image before sending |
+| #6 | never put secrets in frontend code |
+| #7 | handle the GAS URL redirect |
 | #8, #8.1 | deploy URL format + multi-account fix (`?authuser=`) |
 | #9 | GitHub Pages setup |
 | #10 | PWA installable + offline cache |
-| #11 | error handling รวม CORS / network |
-| #12 | เมื่อไหร่ใช้ HtmlService vs external frontend |
+| #11 | error handling including CORS / network |
+| #12 | when to use HtmlService vs an external frontend |
 | #13 | log GAS-side string mismatch |
 
-## Context: ทำไมต้องแยก frontend ออกจาก GAS
+## Context: why the frontend must be separated from GAS
 
-GAS web app รันใน sandbox iframe ของ `*.googleusercontent.com` — Google จำกัด API หลายตัวที่ web ทั่วไปทำได้:
+A GAS web app runs inside a sandboxed iframe on `*.googleusercontent.com` — Google blocks many APIs that a normal website can use:
 
-| API | สถานะใน GAS iframe |
+| API | Status in the GAS iframe |
 |---|---|
-| `getUserMedia()` (กล้อง/ไมค์) | ❌ block (Permissions Policy block) |
-| `navigator.geolocation` | ⚠️ ขอ permission แล้วบางครั้งไม่ผ่าน |
-| `navigator.clipboard.writeText` | ⚠️ ต้อง user-gesture, บางครั้ง fail |
-| `IndexedDB`, `localStorage` | ⚠️ มี แต่ scope = iframe origin (ไม่ persist ระหว่าง deploy) |
-| `Notification API` (push) | ❌ block |
-| `Service Worker` (PWA, offline) | ❌ block |
-| File System Access API | ❌ block |
-| WebRTC | ❌ block |
-| Custom domain | ❌ ไม่ได้ |
-| Service Workers / PWA installable | ❌ ไม่ได้ |
-| Open Graph / SEO ที่ดี | ❌ (iframe wrapper เห็นน้อย) |
+| `getUserMedia()` (camera/mic) | ❌ blocked (Permissions Policy block) |
+| `navigator.geolocation` | ⚠️ asks for permission and sometimes still fails |
+| `navigator.clipboard.writeText` | ⚠️ requires a user gesture, sometimes fails |
+| `IndexedDB`, `localStorage` | ⚠️ available but scoped to the iframe origin (does not persist across deploys) |
+| `Notification API` (push) | ❌ blocked |
+| `Service Worker` (PWA, offline) | ❌ blocked |
+| File System Access API | ❌ blocked |
+| WebRTC | ❌ blocked |
+| Custom domain | ❌ not possible |
+| Service Workers / PWA installable | ❌ not possible |
+| Good Open Graph / SEO | ❌ (the iframe wrapper hides most of it) |
 
-**ทางออก:** ย้าย frontend ไป **GitHub Pages / Netlify / Vercel** ที่เป็น origin ปกติ — capabilities ครบเหมือนเว็บทั่วไป + เรียก GAS เป็น API backend ผ่าน `fetch`
+**Workaround:** move the frontend to **GitHub Pages / Netlify / Vercel**, a normal origin — full capabilities like any regular website + call GAS as an API backend through `fetch`
 
 ---
 
@@ -57,11 +57,11 @@ GAS web app รันใน sandbox iframe ของ `*.googleusercontent.com` �
 
 ---
 
-## Rule #1: GAS endpoint — รับ POST `text/plain` หลีกเลี่ยง CORS preflight
+## Rule #1: GAS endpoint — accept POST `text/plain` to avoid the CORS preflight
 
-**สำคัญ:** GAS **ไม่ตอบ `OPTIONS` preflight** — ถ้า client ส่ง `Content-Type: application/json` browser จะส่ง preflight ก่อน → fail
+**Important:** GAS **does not answer `OPTIONS` preflight** — if the client sends `Content-Type: application/json` the browser sends a preflight first → fail
 
-### ✓ Good — ใช้ `text/plain` (simple request, ไม่ trigger preflight)
+### ✓ Good — use `text/plain` (simple request, no preflight)
 
 ```javascript
 // Server (Code.gs)
@@ -102,10 +102,10 @@ async function rpc(fn, ...args) {
   console.log('→ RPC', fn, args);
   const res = await fetch(GAS_URL, {
     method: 'POST',
-    // ⚠️ ห้ามใส่ application/json — จะ trigger preflight
+    // ⚠️ never use application/json — it triggers a preflight
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ fn, args }),
-    redirect: 'follow', // GAS redirect ครั้งแรก
+    redirect: 'follow', // GAS redirects on the first call
   });
   const data = await res.json();
   console.log('← RPC', fn, (Date.now() - t0) + 'ms', data);
@@ -117,22 +117,22 @@ async function rpc(fn, ...args) {
 
 ## Rule #2: deploy `Execute as: Me` + `Anyone (even anonymous)`
 
-ไม่งั้น browser fetch จะเจอ HTML login page ของ Google แทน JSON
+Otherwise the browser fetch gets Google's HTML login page instead of JSON.
 
 **Deploy settings:**
 - **Execute the app as:** Me (`your@gmail.com`)
 - **Who has access:** Anyone
 
-**Security implication:** ทุก request รันด้วยสิทธิ์ของ owner → ทุก mutation ต้อง guard ด้วย token/role check ใน server function (ดู `rules/security.md`)
+**Security implication:** every request runs with the owner's permissions → every mutation must be guarded by a token/role check inside the server function (see `rules/security.md`)
 
 ---
 
-## Rule #3: ทุก request ต้องส่ง auth token ใน payload
+## Rule #3: every request must send an auth token in the payload
 
-GAS endpoint public → ใครยิงก็ได้ → **ต้อง verify session ทุก call**
+The GAS endpoint is public → anyone can hit it → **you must verify the session on every call**
 
 ```javascript
-// Client — เก็บ token หลัง login
+// Client — keep the token after login
 let SESSION_TOKEN = localStorage.getItem('token') || '';
 
 async function rpc(fn, ...args) {
@@ -155,7 +155,7 @@ async function login(username, password) {
 ```
 
 ```javascript
-// Server — verify ทุก function ยกเว้น login
+// Server — verify on every function except login
 function doPost(e) {
   const payload = JSON.parse(e.postData.contents || '{}');
   const { fn, args, token } = payload;
@@ -163,10 +163,10 @@ function doPost(e) {
   const PUBLIC_FNS = ['login'];
   let caller = null;
   if (!PUBLIC_FNS.includes(fn)) {
-    caller = requireSession_(token); // throw ถ้า token ผิด/หมดอายุ
+    caller = requireSession_(token); // throws if the token is invalid/expired
   }
 
-  // pass caller เป็น arg แรกแทน userId
+  // pass caller as the first arg instead of userId
   const result = globalThis[fn].apply(null, caller ? [caller, ...args] : args);
   return jsonOut_(result);
 }
@@ -174,25 +174,25 @@ function doPost(e) {
 
 ---
 
-## Rule #4: camera capture pattern (use case ที่ตอบโจทย์เคสนี้)
+## Rule #4: camera capture pattern (the use case this rule solves)
 
 ### Client — GitHub Pages
 
 ```html
-<!-- ใช้ <input type="file" capture> — เปิดกล้องของ OS โดยไม่ต้อง getUserMedia -->
+<!-- use <input type="file" capture> — opens the OS camera without getUserMedia -->
 <input type="file" accept="image/*" capture="environment" id="camera">
 
-<!-- หรือ getUserMedia ก็ใช้ได้แล้วใน origin ปกติ -->
+<!-- or getUserMedia, which works fine on a normal origin -->
 <video id="preview" autoplay playsinline></video>
-<button onclick="capture()">📷 ถ่าย</button>
+<button onclick="capture()">📷 Capture</button>
 <canvas id="canvas" hidden></canvas>
 ```
 
 ```javascript
-// Option A: getUserMedia (กล้องในเว็บ ไม่ต้องออกจากแอป)
+// Option A: getUserMedia (camera inside the page, no app switching)
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'environment' }, // กล้องหลัง
+    video: { facingMode: 'environment' }, // rear camera
     audio: false,
   });
   document.getElementById('preview').srcObject = stream;
@@ -206,18 +206,18 @@ async function capture() {
   canvas.getContext('2d').drawImage(video, 0, 0);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
-  // ส่งไป GAS
-  const res = await rpc('uploadImage', dataUrl, { caption: 'หน้าบ้าน' });
-  if (res.ok) alert('อัพโหลดสำเร็จ');
+  // send to GAS
+  const res = await rpc('uploadImage', dataUrl, { caption: 'front yard' });
+  if (res.ok) alert('Upload succeeded');
 }
 
-// Option B: <input type="file" capture> — ง่ายกว่า ใช้กล้อง OS
+// Option B: <input type="file" capture> — simpler, uses the OS camera
 document.getElementById('camera').onchange = async (e) => {
   const file = e.target.files[0];
   const dataUrl = await fileToDataUrl(file);
-  // compress ก่อนส่ง (Rule #5)
+  // compress before sending (Rule #5)
   const compressed = await compressImage(dataUrl, 1280);
-  await rpc('uploadImage', compressed, { caption: 'หน้าบ้าน' });
+  await rpc('uploadImage', compressed, { caption: 'front yard' });
 };
 
 function fileToDataUrl(file) {
@@ -229,22 +229,22 @@ function fileToDataUrl(file) {
 }
 ```
 
-### Server — รับ base64 บันทึก Drive
+### Server — receive base64, store in Drive
 
 ```javascript
 function uploadImage(caller, dataUrl, meta) {
   Logger.log('[uploadImage] in user=' + caller.UserID + ' size=' + (dataUrl || '').length);
   try {
-    if (!dataUrl || dataUrl.indexOf('data:image/') !== 0) throw new Error('รูปไม่ถูกต้อง');
+    if (!dataUrl || dataUrl.indexOf('data:image/') !== 0) throw new Error('invalid image data');
     const m = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
-    if (!m) throw new Error('รูปแบบ base64 ผิด');
+    if (!m) throw new Error('invalid base64 format');
     const bytes = Utilities.base64Decode(m[2]);
-    if (bytes.length > 5 * 1024 * 1024) throw new Error('รูปใหญ่เกิน 5MB');
+    if (bytes.length > 5 * 1024 * 1024) throw new Error('image larger than 5MB');
 
     const blob = Utilities.newBlob(bytes, m[1], 'photo_' + Date.now() + '.jpg');
     const folder = DriveApp.getFolderById(getConfig_('UPLOADS_FOLDER_ID'));
     const file = folder.createFile(blob);
-    // ห้ามใช้ ANYONE_WITH_LINK บน Workspace policy strict (rule drive-ops #4.1)
+    // never use ANYONE_WITH_LINK under a strict Workspace policy (rule drive-ops #4.1)
     Logger.log('[uploadImage] out ok fileId=' + file.getId());
     return { ok: true, fileId: file.getId() };
   } catch (err) {
@@ -256,7 +256,7 @@ function uploadImage(caller, dataUrl, meta) {
 
 ---
 
-## Rule #5: บีบรูปก่อนส่ง — RPC payload limit ~50MB แต่ network ช้า
+## Rule #5: compress the image before sending — the RPC payload limit is ~50MB but the network is slow
 
 ```javascript
 async function compressImage(dataUrl, maxWidth = 1280, quality = 0.85) {
@@ -275,85 +275,85 @@ async function compressImage(dataUrl, maxWidth = 1280, quality = 0.85) {
 }
 ```
 
-ขนาดทั่วไป: รูปกล้อง iPhone 12MP ~3-5MB → compress 1280px จะเหลือ 200-400KB
+Typical size: a 12MP iPhone camera photo is ~3-5MB → compressed to 1280px it comes down to 200-400KB
 
 ---
 
-## Rule #6: ห้ามใส่ secret/API key ใน frontend code
+## Rule #6: never put secrets / API keys in frontend code
 
-**Why:** GitHub Pages = repo public → ทุกคนเห็น source
+**Why:** GitHub Pages = a public repo → everyone can read the source
 
 ```javascript
 // ✗ Bad — leak
 const API_KEY = 'AIzaSyB...';
 
-// ✓ Good — secret อยู่ใน GAS (ScriptProperties)
+// ✓ Good — the secret lives in GAS (ScriptProperties)
 async function callExternal() {
-  // GAS เป็น proxy — เรียก external API ด้วย key ของมัน
+  // GAS acts as the proxy — it calls the external API with its own key
   return await rpc('proxyToLineApi', { to: userId, message: 'hi' });
 }
 ```
 
 ---
 
-## Rule #7: handle redirect — GAS URL redirect ครั้งแรก
+## Rule #7: handle the redirect — the GAS URL redirects on the first call
 
-GAS แรกครั้งจะ 302 redirect ไปยัง `script.googleusercontent.com/...` — `fetch` ต้อง `redirect: 'follow'` (default ใน browser แต่ระบุไว้ชัดเจน)
+The first time, GAS issues a 302 redirect to `script.googleusercontent.com/...` — `fetch` must use `redirect: 'follow'` (the browser default, but state it explicitly)
 
 ```javascript
 const res = await fetch(GAS_URL, {
   method: 'POST',
   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
   body: JSON.stringify(payload),
-  redirect: 'follow', // ระบุชัดเจน
+  redirect: 'follow', // be explicit
 });
 ```
 
-ปัญหา: บาง CORS proxy (ถ้าใช้) ไม่ follow redirect → ต้อง deploy GAS ผ่าน new deployment URL (ที่ลงท้าย `/exec`) ไม่ใช่ test URL (`/dev`)
+Problem: some CORS proxies (if you use one) do not follow redirects → deploy GAS via a new deployment URL (the one ending in `/exec`), not the test URL (`/dev`)
 
 ---
 
-## Rule #8: deploy URL format ที่ใช้กับ fetch ได้
+## Rule #8: the deploy URL format that works with fetch
 
-| URL | ใช้กับ fetch จาก external origin? |
+| URL | Usable with fetch from an external origin? |
 |---|---|
-| `/macros/s/<id>/exec` | ✅ ใช้ได้ (production deployment) |
-| `/macros/s/<id>/dev` | ❌ ต้อง login Google + ไม่ stable |
+| `/macros/s/<id>/exec` | ✅ works (production deployment) |
+| `/macros/s/<id>/dev` | ❌ requires Google login + not stable |
 
-**Tip:** ทุกครั้งที่แก้โค้ดต้อง **redeploy เป็นเวอร์ชันใหม่** (เมนู Deploy → Manage deployments → Edit → New version) — ไม่งั้น URL `/exec` ยังเรียกโค้ดเก่า
+**Tip:** every time you change the code you must **redeploy as a new version** (menu Deploy → Manage deployments → Edit → New version) — otherwise the `/exec` URL still runs the old code
 
 ---
 
-## Rule #8.1: multi-account login — append `/u/0/` หรือ `?authuser=` กัน "ไม่สามารถเปิดไฟล์ได้ในเวลานี้"
+## Rule #8.1: multi-account login — append `/u/0/` or `?authuser=` to prevent "unable to open this file right now"
 
-**Bug จริง:** user ที่ login Google หลายบัญชีในเครื่องเดียว (เช่น ส่วนตัว + งาน + โรงเรียน) เปิดลิงก์ GAS แล้วเจอ:
+**Real bug:** a user signed into several Google accounts on one machine (e.g. personal + work + school) opens the GAS link and sees:
 
-> **ขออภัย ไม่สามารถเปิดไฟล์ได้ในเวลานี้**
-> โปรดตรวจสอบที่อยู่และลองอีกครั้ง
+> **Sorry, unable to open this file right now**
+> Please check the address and try again
 
-**สาเหตุ:** Google ไม่รู้ว่าควรใช้บัญชีไหนเปิด — บัญชีแรก (default `/u/0/`) อาจไม่ใช่บัญชีที่มีสิทธิ์เข้า web app (ถ้า deploy `Anyone within domain` หรือ `Anyone with Google account`)
+**Cause:** Google does not know which account to use — the first account (the default `/u/0/`) may not be the one with access to the web app (if it is deployed as `Anyone within domain` or `Anyone with Google account`)
 
-### ✓ Fix สำหรับ user
+### ✓ Fix for users
 
-ต่อท้าย URL `/exec`:
+Append to the `/exec` URL:
 
-| รูปแบบ | ใช้เมื่อ |
+| Format | Use when |
 |---|---|
-| `.../exec/usp=sharing` | ทั่วไป — Google เลือกบัญชีให้ |
-| `.../exec?authuser=0` | บังคับใช้บัญชี default (login ตัวแรก) |
-| `.../exec?authuser=1` | บัญชีที่ 2 |
-| `.../exec?authuser=user@gmail.com` | ระบุ email ตรง ๆ — ชัดเจนสุด |
-| `https://script.google.com/u/1/macros/s/<id>/exec` | inline `/u/<index>/` ในพาธ |
+| `.../exec/usp=sharing` | the usual case — Google picks the account |
+| `.../exec?authuser=0` | force the default account (the first one signed in) |
+| `.../exec?authuser=1` | the 2nd account |
+| `.../exec?authuser=user@gmail.com` | explicit email — the clearest option |
+| `https://script.google.com/u/1/macros/s/<id>/exec` | inline `/u/<index>/` in the path |
 
-**แนะนำ:** ส่งลิงก์แบบ `?authuser=<email>` ให้ user ที่จดทะเบียนไว้
+**Recommended:** send links as `?authuser=<email>` to users who have registered.
 
 ```
 https://script.google.com/macros/s/AKfycb.../exec?authuser=teacher@school.ac.th
 ```
 
-### ✓ Fix สำหรับ developer — generate ลิงก์ที่ embed authuser
+### ✓ Fix for developers — generate links with authuser embedded
 
-ถ้าระบบของคุณรู้ email ของ user (login แล้ว) — สร้างลิงก์ที่แนบ authuser ทุกครั้งที่ส่ง:
+If your system knows the user email (after login) — build the link with authuser attached every time you send it:
 
 ```javascript
 // Server (GAS)
@@ -365,43 +365,43 @@ function getDeployedUrl_(forUserEmail) {
   return base;
 }
 
-// ใช้ใน notification ที่ส่งให้ user
+// use in notifications sent to users
 function sendApprovalNotification_(email, recordId) {
   const url = getDeployedUrl_(email) + '&action=approve&id=' + recordId;
   MailApp.sendEmail({
     to: email,
-    subject: 'มีคำขอรออนุมัติ',
-    htmlBody: `<a href="${url}">เปิดเพื่ออนุมัติ</a>`,
+    subject: 'Approval request pending',
+    htmlBody: `<a href="${url}">Open to approve</a>`,
   });
 }
 ```
 
-### ✓ Fix สำหรับ user ที่เจอ error แล้ว
+### ✓ Fix for users who already hit the error
 
-ถ้าตอนนี้ click ลิงก์ใน LINE/email แล้วเจอ error:
+If clicking the link in LINE/email now shows an error:
 
-1. **วิธีง่ายสุด** — copy URL → เปิดหน้าใหม่ในโหมด Incognito → login บัญชีเป้าหมาย → paste
-2. **บนเดียวกัน** — `chrome://settings/people` หรือ icon profile บนขวา → switch ไปบัญชีเป้าหมายเป็น default → retry
-3. **เพิ่ม `/u/<index>/`** ใน URL — index 0 = บัญชีแรกที่ login, 1 = ที่สอง, ...
-4. **ระบุ `?authuser=<email>`** ต่อท้าย URL — ชัวร์สุดเพราะระบุ email ตรง
+1. **Easiest** — copy the URL → open a fresh Incognito window → sign in to the target account → paste
+2. **Same browser** — `chrome://settings/people` or the profile icon at the top right → switch the target account to default → retry
+3. **Add `/u/<index>/`** to the URL — index 0 = the first account signed in, 1 = the second, ...
+4. **Set `?authuser=<email>`** at the end of the URL — the surest fix because it names the email directly
 
-### Page UX hint — แสดงคำแนะนำตอน user เจอ error
+### Page UX hint — show guidance when a user hits the error
 
-ถ้า user copy URL ผิดมาเปิด → server ส่ง HTML guide แทน blank error:
+If a user pastes a malformed URL → the server returns an HTML guide instead of a blank error:
 
 ```html
 <!-- error-account.html (GitHub Pages frontend) -->
 <div>
-  <h2>ไม่สามารถเปิดได้</h2>
-  <p>ลองวิธีต่อไปนี้:</p>
+  <h2>Cannot open</h2>
+  <p>Try one of these:</p>
   <ol>
-    <li>กดที่ <a id="link-authuser">ลิงก์นี้</a> (จะแนบบัญชีอัตโนมัติ)</li>
-    <li>หรือเปิด <kbd>Ctrl+Shift+N</kbd> (Incognito) แล้วเปิด URL ใหม่</li>
-    <li>หรือสลับเป็นบัญชี <em>your@school.ac.th</em> ในมุมขวาบนของ Google</li>
+    <li>Click <a id="link-authuser">this link</a> (it attaches the account automatically)</li>
+    <li>Or open <kbd>Ctrl+Shift+N</kbd> (Incognito) and open the URL again</li>
+    <li>Or switch to the <em>your@school.ac.th</em> account in the Google account menu at the top right</li>
   </ol>
 </div>
 <script>
-  const userEmail = prompt('Email ที่ใช้งานในระบบ:');
+  const userEmail = prompt('Email you use in this system:');
   if (userEmail) {
     document.getElementById('link-authuser').href = APP_GAS_URL + '?authuser=' + encodeURIComponent(userEmail);
   }
@@ -417,19 +417,19 @@ your-repo/
 ├── index.html
 ├── css/
 ├── js/
-├── manifest.json     ← PWA manifest ใช้ได้แล้ว
-└── sw.js             ← Service Worker ใช้ได้แล้ว
+├── manifest.json     ← PWA manifest works
+└── sw.js             ← Service Worker works
 ```
 
-Settings → Pages → Source: `main` branch / `(root)` หรือ `/docs`
+Settings → Pages → Source: `main` branch / `(root)` or `/docs`
 
-URL จะเป็น `https://<user>.github.io/<repo>/`
+The URL becomes `https://<user>.github.io/<repo>/`
 
-**Custom domain:** ใส่ CNAME file + DNS → ได้ `https://yourdomain.com/`
+**Custom domain:** add a CNAME file + DNS → you get `https://yourdomain.com/`
 
 ---
 
-## Rule #10: PWA installable + offline cache (bonus ที่ทำได้แล้ว)
+## Rule #10: PWA installable + offline cache (a bonus you can use today)
 
 ```javascript
 // sw.js
@@ -441,7 +441,7 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // ห้าม cache GAS API calls
+  // never cache GAS API calls
   if (e.request.url.includes('script.google.com')) return;
   e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
 });
@@ -455,11 +455,11 @@ self.addEventListener('fetch', (e) => {
 </script>
 ```
 
-ผู้ใช้กด "Add to Home Screen" → แอปอยู่บนหน้าจอเหมือน native app
+Users tap "Add to Home Screen" → the app sits on the home screen like a native app
 
 ---
 
-## Rule #11: error handling รวม CORS / network errors
+## Rule #11: error handling including CORS / network errors
 
 ```javascript
 async function rpc(fn, ...args) {
@@ -474,41 +474,41 @@ async function rpc(fn, ...args) {
     }
     const text = await res.text();
     if (!text || text.trim().startsWith('<')) {
-      // ได้ HTML กลับมา = GAS login page = deploy ผิด setting
-      throw new Error('GAS endpoint ตั้งค่าผิด (กลับมาเป็น HTML ไม่ใช่ JSON) — ตรวจ Execute as / Who has access');
+      // got HTML back = GAS login page = wrong deploy setting
+      throw new Error('GAS endpoint misconfigured (returned HTML instead of JSON) — check Execute as / Who has access');
     }
     return JSON.parse(text);
   } catch (err) {
     console.error('✗ RPC', fn, err);
     // network error / parse error / CORS
-    return { ok: false, message: 'เชื่อมต่อ server ไม่สำเร็จ: ' + err.message };
+    return { ok: false, message: 'Could not reach the server: ' + err.message };
   }
 }
 ```
 
 ---
 
-## Rule #12: comparison — เมื่อไหร่ใช้ GAS HtmlService vs external frontend
+## Rule #12: comparison — when to use GAS HtmlService vs an external frontend
 
-| ต้องการ | HtmlService (built-in) | GitHub Pages + GAS API |
+| Need | HtmlService (built-in) | GitHub Pages + GAS API |
 |---|---|---|
-| Quick prototype | ✅ ง่ายมาก | ❌ setup เยอะ |
-| ใช้กล้อง / mic | ❌ block | ✅ |
+| Quick prototype | ✅ very easy | ❌ heavy setup |
+| Camera / mic | ❌ blocked | ✅ |
 | Service Worker / PWA | ❌ | ✅ |
 | Custom domain | ❌ | ✅ |
 | SEO / Open Graph | ❌ | ✅ |
-| ไม่ต้อง host แยก | ✅ | ❌ |
-| ไม่ต้อง CORS | ✅ (in-iframe) | ⚠️ ต้อง text/plain trick |
-| auth ผ่าน Google native | ✅ | ❌ ต้องทำเอง (token) |
+| No separate hosting | ✅ | ❌ |
+| No CORS handling | ✅ (in-iframe) | ⚠️ needs the text/plain trick |
+| Auth via native Google | ✅ | ❌ build it yourself (token) |
 | Free tier limit | GAS quota | GH Pages 100GB/mo bandwidth |
 
-**Heuristic:** internal tool ของทีม 10 คน → HtmlService; ใช้กล้อง/scale → external frontend
+**Heuristic:** internal tool for a 10-person team → HtmlService; camera use or scale → external frontend
 
 ---
 
-## Rule #13: log GAS-side รับ request ก็เป็น string mismatch
+## Rule #13: log GAS-side — a received request can still be a string mismatch
 
-ใน `doPost(e)` `e.postData.contents` คือ string ที่ client ส่งมา — log แล้วเช็คก่อน
+In `doPost(e)`, `e.postData.contents` is the string the client sent — log it and check before parsing.
 
 ```javascript
 function doPost(e) {
@@ -518,4 +518,4 @@ function doPost(e) {
 }
 ```
 
-ถ้า `type` คือ `application/x-www-form-urlencoded` แทน `text/plain` — แสดงว่า client ส่งผิดวิธี (อาจใช้ FormData)
+If `type` is `application/x-www-form-urlencoded` instead of `text/plain` — the client sent it the wrong way (it is probably using FormData)

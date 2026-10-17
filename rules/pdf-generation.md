@@ -1,28 +1,28 @@
 # PDF Generation
 
-แนวทางสร้าง PDF จาก Google Sheet template — เทคนิคจริงที่ใช้ใน production
+Generating PDFs from a Google Sheet template — techniques that actually hold up in production
 
-**สารบัญ** (ไฟล์ยาว — ข้ามไป rule ที่เกี่ยวกับงานตรงหน้าได้เลย):
+**Table of contents** (long file — jump straight to the rule that matches your task):
 
-| Rule | เรื่อง |
+| Rule | Topic |
 |---|---|
-| #1 | placeholder pattern `{{KEY}}` ใน template sheet |
+| #1 | placeholder pattern `{{KEY}}` in the template sheet |
 | #2 | copy template → temp sheet → export → delete temp |
-| #3 | export PDF ผ่าน UrlFetch + OAuth token |
-| #4 | insertImage anchor = บนซ้ายเสมอ — คำนวณ offset เอง |
-| #5 | รักษาอัตราส่วนของรูป — ห้าม stretch |
-| #6 | ตัดขอบขาวของรูปก่อน upload (signature canvas) |
-| #7 | cache PDF — ลบไฟล์เดิมก่อนสร้างใหม่ |
-| #8 | business rule guard ก่อน generate |
-| #9 | Thai date formatting (พ.ศ.) — helper เดียวทุกที่ |
-| #10 | get-or-generate pattern แยก endpoint |
+| #3 | export PDF via UrlFetch + OAuth token |
+| #4 | insertImage anchor = always top-left — compute the offset yourself |
+| #5 | preserve the image aspect ratio — never stretch |
+| #6 | trim the white border off the image before upload (signature canvas) |
+| #7 | cache the PDF — trash the old file before creating a new one |
+| #8 | business rule guard before generating |
+| #9 | locale-aware date formatting — one helper everywhere |
+| #10 | get-or-generate pattern in separate endpoints |
 | #11 | PDF export URL parameters — reference table |
-| #12 | folder structure — เก็บ PDF แยกตาม owner |
-| #13 | PDF filename — ใช้ RecordID ไม่ใช่ display name |
+| #12 | folder structure — store PDFs per owner |
+| #13 | PDF filename — use RecordID, not the display name |
 
-## Rule #1: ใช้ placeholder pattern `{{KEY}}` ใน template sheet
+## Rule #1: use the `{{KEY}}` placeholder pattern in the template sheet
 
-**Why:** สามารถสร้าง template ผ่าน UI ของ Sheets (formatting, font, alignment) ได้สบาย ไม่ต้องเขียน layout ด้วย code
+**Why:** the template can be built comfortably through the Sheets UI (formatting, fonts, alignment) without writing any layout code
 
 ```javascript
 const FIELD_TO_PLACEHOLDER = {
@@ -56,23 +56,23 @@ function fillPlaceholders_(tempSheet, mapping) {
 }
 ```
 
-**ห้าม `range.setValues()`** — template ส่วนใหญ่มี merged cells (ดู `rules/spreadsheet-ops.md` Rule #2)
+**Never use `range.setValues()`** — most templates contain merged cells (see `rules/spreadsheet-ops.md` Rule #2)
 
 ---
 
 ## Rule #2: copy template → temp sheet → export → delete temp
 
-**Why:** อย่าแก้ template โดยตรง (กระทบ user อื่น) — copy ก่อนเสมอ
+**Why:** never edit the template in place (it affects other users) — always copy first
 
 ```javascript
 function generatePdfForRecord(callerUserId, rowIndex) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) throw new Error('ระบบกำลังสร้าง PDF อื่น กรุณาลองใหม่');
+  if (!lock.tryLock(30000)) throw new Error('Another PDF is being generated. Please retry');
   let tempSheet = null;
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const tpl = ss.getSheetByName('PdfTemplate');
-    if (!tpl) throw new Error('ไม่พบ template sheet');
+    if (!tpl) throw new Error('template sheet not found');
     tempSheet = tpl.copyTo(ss);
     tempSheet.setName('__pdf_temp_' + Date.now());
     tempSheet.showSheet();
@@ -97,9 +97,9 @@ function generatePdfForRecord(callerUserId, rowIndex) {
 
 ---
 
-## Rule #3: export PDF ผ่าน UrlFetch + OAuth token (ไม่ใช่ DriveApp)
+## Rule #3: export PDF via UrlFetch + OAuth token (not DriveApp)
 
-`SpreadsheetApp` ไม่มี `exportAsPdf()` — ต้อง fetch URL `/export?format=pdf`
+`SpreadsheetApp` has no `exportAsPdf()` — you must fetch the `/export?format=pdf` URL
 
 ```javascript
 function exportSheetAsPdf_(ssId, gid, filename) {
@@ -107,7 +107,7 @@ function exportSheetAsPdf_(ssId, gid, filename) {
     'format=pdf',
     'gid=' + gid,
     'portrait=true',
-    'fitw=true',           // fit ความกว้างให้พอดี
+    'fitw=true',           // fit the content to the page width
     'size=A4',
     'gridlines=false',
     'printtitle=false',
@@ -124,13 +124,13 @@ function exportSheetAsPdf_(ssId, gid, filename) {
     muteHttpExceptions: true,
   });
   if (resp.getResponseCode() !== 200) {
-    throw new Error('Export PDF ล้มเหลว: HTTP ' + resp.getResponseCode());
+    throw new Error('PDF export failed: HTTP ' + resp.getResponseCode());
   }
   return resp.getBlob().setName(filename + '.pdf');
 }
 ```
 
-**Required scope** (ใน `appsscript.json`):
+**Required scope** (in `appsscript.json`):
 ```json
 "oauthScopes": [
   "https://www.googleapis.com/auth/script.external_request"
@@ -139,11 +139,11 @@ function exportSheetAsPdf_(ssId, gid, filename) {
 
 ---
 
-## Rule #4: insertImage anchor = บนซ้ายเสมอ — alignment ของ cell ไม่มีผล
+## Rule #4: insertImage anchor = always top-left — the cell alignment has no effect
 
-**Bug จริง:** ตั้ง horizontal align = right ใน cell ที่มี placeholder รูป → รูปยังชิดซ้าย เพราะ anchor อยู่บนซ้ายของเซลล์
+**Real bug:** set horizontal align = right on a cell that holds the image placeholder → the image is still flush left, because the anchor sits at the top-left of the cell
 
-### ✓ Good — คำนวณ offset เอง
+### ✓ Good — compute the offset yourself
 
 ```javascript
 function insertSignatureAtPlaceholder_(sheet, placeholder, signatureBlob) {
@@ -186,26 +186,26 @@ function findCellByExact_(sheet, needle) {
 
 ---
 
-## Rule #5: รักษาอัตราส่วนของรูป — ห้าม stretch
+## Rule #5: preserve the image aspect ratio — never stretch
 
-**Why:** signature ที่ stretch จากสี่เหลี่ยมจัตุรัสเป็นแนวนอนยาว ๆ จะดูบิดเบี้ยว
+**Why:** a signature stretched from a square into a long horizontal box looks distorted
 
 ```javascript
 // ✗ Bad
 img.setWidth(180).setHeight(50); // stretch fixed
 
-// ✓ Good — fit ใน max box โดยรักษา ratio
+// ✓ Good — fit inside the max box while preserving the ratio
 const ratio = Math.min(MAX.width / w0, MAX.height / h0, 1);
 img.setWidth(Math.round(w0 * ratio)).setHeight(Math.round(h0 * ratio));
 ```
 
 ---
 
-## Rule #6: ตัดขอบขาวของรูปก่อน upload (signature canvas)
+## Rule #6: trim the white border off the image before upload (signature canvas)
 
-**Why:** ถ้า user วาด signature ในมุมล่างซ้ายของ canvas 600×200 แต่ upload ทั้ง canvas — รูปกินพื้นที่ส่วนใหญ่เป็น whitespace ทำให้แทรกใน PDF แล้วทับแถวอื่น
+**Why:** if the user signs in the bottom-left corner of a 600×200 canvas but uploads the whole canvas — the image is mostly whitespace, so once inserted into the PDF it covers other rows
 
-### ✓ Good — crop ก่อนส่ง
+### ✓ Good — crop before sending
 
 ```javascript
 function trimCanvasToInk(srcCanvas, padding = 8) {
@@ -222,7 +222,7 @@ function trimCanvasToInk(srcCanvas, padding = 8) {
       }
     }
   }
-  if (maxX < 0) return null; // canvas ว่าง
+  if (maxX < 0) return null; // empty canvas
   minX = Math.max(0, minX - padding);
   minY = Math.max(0, minY - padding);
   maxX = Math.min(srcCanvas.width - 1, maxX + padding);
@@ -240,42 +240,43 @@ function trimCanvasToInk(srcCanvas, padding = 8) {
 
 ---
 
-## Rule #7: cache PDF — ลบไฟล์เดิมก่อนสร้างใหม่
+## Rule #7: cache the PDF — trash the old file before creating a new one
 
 ```javascript
-// ก่อนสร้าง PDF ใหม่ ทิ้งไฟล์เก่า
+// before generating a new PDF, trash the old file
 if (record.PdfFileId) {
   try { DriveApp.getFileById(record.PdfFileId).setTrashed(true); } catch (e) {}
 }
 ```
 
-ใน UI ให้มีปุ่ม "สร้างใหม่" ที่ confirm ก่อน — เผื่อ template เปลี่ยน หรือข้อมูล record อัพเดทหลังจาก approve
+In the UI, add a "Regenerate" button that asks for confirmation first — in case the template changed, or the record data was updated after approval
 
 ---
 
-## Rule #8: business rule guard ก่อน generate
+## Rule #8: business rule guard before generating
 
 ```javascript
-if (record.AcademicStatus !== 'ผ่าน' || record.DirectorStatus !== 'ผ่าน') {
-  throw new Error('ต้องผ่านการตรวจจากทุกฝ่ายก่อน จึงจะสร้าง PDF ได้');
+if (record.AcademicStatus !== 'PASSED' || record.DirectorStatus !== 'PASSED') {
+  throw new Error('All approvals must be complete before a PDF can be generated');
 }
 ```
 
-Guard ทั้งสองชั้น — server (authoritative) + client (UX ดี ซ่อนปุ่มเลย ไม่ให้ user กดผิด)
+Guard on both layers — server (authoritative) + client (better UX: hide the button entirely so users cannot press it by mistake)
 
 ---
 
-## Rule #9: Thai date formatting (พ.ศ.) — ใช้ helper เดียวกันทุกที่
+## Rule #9: locale-aware date formatting — use the same helper everywhere
 
-**Why:** date ใน Sheet เก็บเป็น `Date` object หรือ ISO string — ฝัง template ตรง ๆ จะออก `Mon May 28 2026 12:34:56 GMT+0700` ที่ user อ่านไม่เข้าใจ
+**Why:** dates in the Sheet are stored as a `Date` object or an ISO string — embedding them straight into the template produces `Mon May 28 2026 12:34:56 GMT+0700`, which nobody can read
 
-### ✓ Good — helper เดียว ใช้ทุก placeholder ที่เป็นวันที่
+### ✓ Good — one helper for every date placeholder
 
 ```javascript
-const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
-                     'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-const THAI_MONTHS_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
-                          'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+// locale month names — swap in the arrays your users expect
+const THAI_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun',
+                     'Jul','Aug','Sep','Oct','Nov','Dec'];
+const THAI_MONTHS_FULL = ['January','February','March','April','May','June',
+                          'July','August','September','October','November','December'];
 
 function formatThaiDate_(input, opts) {
   if (!input) return '';
@@ -283,7 +284,7 @@ function formatThaiDate_(input, opts) {
   if (isNaN(d.getTime())) return '';
   const day = d.getDate();
   const month = (opts && opts.full) ? THAI_MONTHS_FULL[d.getMonth()] : THAI_MONTHS[d.getMonth()];
-  const year = d.getFullYear() + 543; // ค.ศ. → พ.ศ.
+  const year = d.getFullYear() + 543; // CE -> BE (Buddhist Era year)
   return day + ' ' + month + ' ' + year;
 }
 
@@ -292,39 +293,39 @@ function formatThaiDateTime_(input) {
   if (isNaN(d.getTime())) return '';
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
-  return formatThaiDate_(d) + ' ' + hh + ':' + mm + ' น.';
+  return formatThaiDate_(d) + ' ' + hh + ':' + mm;
 }
 
-// Usage ใน mapping
-mapping['TEACHER_DATE']  = formatThaiDate_(record.Timestamp);             // "28 พ.ค. 2569"
+// Usage in the mapping
+mapping['TEACHER_DATE']  = formatThaiDate_(record.Timestamp);             // "28 May 2569"
 mapping['ACADEMIC_DATE'] = formatThaiDate_(record.AcademicApprovedAt);
-mapping['CREATED_AT']    = formatThaiDateTime_(record.Timestamp);         // "28 พ.ค. 2569 14:30 น."
+mapping['CREATED_AT']    = formatThaiDateTime_(record.Timestamp);         // "28 May 2569 14:30"
 ```
 
-**Edge case:** ถ้าฟิลด์ใน Sheet เป็น "ที่ยังไม่ approve" (ค่าว่าง) → helper return `''` ไม่ throw — placeholder ใน PDF จะเป็น blank string ดูสะอาด
+**Edge case:** if the Sheet field is "not approved yet" (an empty value) → the helper returns `''` instead of throwing — the PDF placeholder stays a blank string, which looks clean
 
-**Caveat:** อย่าใช้ `Utilities.formatDate(date, 'Asia/Bangkok', 'd MMM yyyy')` — locale string ของ Apps Script ออกชื่อเดือนเป็นภาษาอังกฤษ ("May" ไม่ใช่ "พ.ค.")
+**Caveat:** do not use `Utilities.formatDate(date, 'Asia/Bangkok', 'd MMM yyyy')` — the Apps Script locale string emits month names in the script locale, not the one your users read, so keep your own month arrays
 
 ---
 
-## Rule #10: cache PDF — get-or-generate pattern แยก endpoint
+## Rule #10: cache the PDF — get-or-generate pattern in separate endpoints
 
-**Why:** generate PDF ใช้เวลา 3-5 วินาที — user ที่กดดู record เดิมซ้ำไม่ควรรอ regenerate ทุกครั้ง
+**Why:** generating a PDF takes 3-5 seconds — a user reopening the same record should not wait for a regeneration every time
 
-### ✓ Good — 2 endpoints แยกกัน
+### ✓ Good — 2 separate endpoints
 
 ```javascript
-// Endpoint #1: ดู PDF (ใช้ cache ถ้ามี)
+// Endpoint #1: read the PDF (use the cache when present)
 function getRecordPdfInfo(callerUserId, rowIndex) {
   try {
     const caller = requireUser_(callerUserId);
     const record = readRecord_(rowIndex);
-    if (!record) throw new Error('ไม่พบ record');
+    if (!record) throw new Error('record not found');
     if (caller.Role === 'teacher' && String(record.TeacherUserID) !== String(caller.UserID)) {
-      throw new Error('ไม่มีสิทธิ์');
+      throw new Error('permission denied');
     }
 
-    // ⚡ cache hit — return ทันที (no lock, no generation)
+    // ⚡ cache hit — return immediately (no lock, no generation)
     if (record.PdfFileId) {
       return {
         ok: true,
@@ -334,78 +335,78 @@ function getRecordPdfInfo(callerUserId, rowIndex) {
       };
     }
 
-    // guard ก่อน fallback
-    if (record.AcademicStatus !== 'ผ่าน' || record.DirectorStatus !== 'ผ่าน') {
-      throw new Error('ต้องผ่านการตรวจจากทุกฝ่ายก่อน จึงจะสร้าง PDF ได้');
+    // guard before falling back
+    if (record.AcademicStatus !== 'PASSED' || record.DirectorStatus !== 'PASSED') {
+      throw new Error('All approvals must be complete before a PDF can be generated');
     }
 
-    // cache miss — generate ใหม่ (slow path)
+    // cache miss — generate a new one (slow path)
     return generatePdfForRecord(callerUserId, rowIndex);
   } catch (err) {
     return { ok: false, message: err.message };
   }
 }
 
-// Endpoint #2: บังคับสร้างใหม่ (regenerate — user กดปุ่ม "สร้างใหม่")
-// → ใช้ generatePdfForRecord() ตรง ๆ
-//   ฟังก์ชันนี้จะ trash ไฟล์เก่าก่อน (Rule #7) แล้วสร้างใหม่
+// Endpoint #2: force regeneration (the user clicks the "Regenerate" button)
+// -> calls generatePdfForRecord() directly
+//   that function trashes the old file first (Rule #7) then generates a new one
 ```
 
 ### ✓ Client-side pattern
 
 ```javascript
-// "เปิด PDF" — fast path, ถ้ามี cache โหลดทันที
+// "Open PDF" — fast path, load the cache immediately if present
 async doOpenPdf() {
   const rec = this.modal.record;
-  if (rec.PdfUrl) { window.open(rec.PdfUrl); return; }  // shortcut ฝั่ง client ด้วย
+  if (rec.PdfUrl) { window.open(rec.PdfUrl); return; }  // short-circuit on the client too
   const res = await rpc('getRecordPdfInfo', this.user.userId, rec.rowIndex);
   if (res.ok) window.open(res.pdfUrl);
 }
 
-// "สร้างใหม่" — slow path, ลบของเก่าแล้วสร้างใหม่
+// "Regenerate" — slow path, trash the old one and generate a new one
 async doRegeneratePdf() {
-  const confirm = await Swal.fire({ title: 'สร้างใหม่?', showCancelButton: true });
+  const confirm = await Swal.fire({ title: 'Regenerate?', showCancelButton: true });
   if (!confirm.isConfirmed) return;
   const res = await rpc('generatePdfForRecord', this.user.userId, rowIndex);
   if (res.ok) window.open(res.pdfUrl);
 }
 ```
 
-**Trade-off:** PDF cache อาจ stale ถ้าข้อมูล record ถูกแก้หลัง approve — แก้ด้วยการ invalidate (clear `PdfFileId` ใน sheet) ตอน mutation สำคัญ หรือให้ user กด "สร้างใหม่" เอง
+**Trade-off:** the PDF cache can go stale if the record data is edited after approval — fix it by invalidating (clearing `PdfFileId` in the sheet) on important mutations, or let the user press "Regenerate" themselves
 
 ---
 
 ## Rule #11: PDF export URL parameters — reference table
 
-ทุก param ของ `/export?format=pdf` มีผลกับ layout PDF ที่ออกมา ไม่ได้เอกสารตรงไหนใน Google docs ครบ — list ที่ใช้บ่อย:
+Every parameter of `/export?format=pdf` affects the resulting PDF layout, and Google does not document all of them in one place — here are the ones you actually use:
 
-| param | ค่าที่ใช้บ่อย | หมายเหตุ |
+| param | common value | notes |
 |---|---|---|
-| `format` | `pdf` | บังคับ |
-| `gid` | sheet ID (จาก `getSheetId()`) | บังคับ — ถ้าไม่ใส่จะ export ทุก sheet ใน spreadsheet |
-| `size` | `A4`, `letter`, `legal`, `0`-`9` | กระดาษ |
-| `portrait` | `true` / `false` | portrait หรือ landscape |
-| `fitw` | `true` / `false` | fit ความกว้าง — แนะนำ `true` กัน column ถูกตัด |
-| `scale` | `1`-`4` | ทดแทน `fitw` — 1=normal, 4=fit ทั้งหน้า |
-| `gridlines` | `true` / `false` | เส้น grid (default true — มักไม่ต้องการใน PDF) |
-| `printtitle` | `true` / `false` | ชื่อ spreadsheet ที่หัวกระดาษ |
-| `sheetnames` | `true` / `false` | ชื่อ sheet ที่หัวกระดาษ |
-| `pagenumbers` | `true` / `false` | เลขหน้า |
+| `format` | `pdf` | required |
+| `gid` | sheet ID (from `getSheetId()`) | required — omit it and every sheet in the spreadsheet is exported |
+| `size` | `A4`, `letter`, `legal`, `0`-`9` | paper |
+| `portrait` | `true` / `false` | portrait or landscape |
+| `fitw` | `true` / `false` | fit the width — use `true` to stop columns from being cut off |
+| `scale` | `1`-`4` | alternative to `fitw` — 1=normal, 4=fit the whole page |
+| `gridlines` | `true` / `false` | gridlines (default true — usually not wanted in a PDF) |
+| `printtitle` | `true` / `false` | print the spreadsheet name in the header |
+| `sheetnames` | `true` / `false` | print the sheet name in the header |
+| `pagenumbers` | `true` / `false` | page numbers |
 | `top_margin`, `bottom_margin`, `left_margin`, `right_margin` | inches (`0.5`) | margin |
-| `horizontal_alignment` | `LEFT`/`CENTER`/`RIGHT` | จัดเนื้อหา PDF |
+| `horizontal_alignment` | `LEFT`/`CENTER`/`RIGHT` | align the PDF content |
 | `vertical_alignment` | `TOP`/`MIDDLE`/`BOTTOM` | |
-| `range` | `A1:E20` | export เฉพาะ range (ถ้าไม่ใส่ = ทั้ง sheet) |
-| `r1`, `c1`, `r2`, `c2` | row/col indices (0-based) | ทางเลือกของ `range` |
-| `ir` | `false` | hide rows ที่ frozen ในการ print |
-| `ic` | `false` | hide columns ที่ frozen |
-| `fzr` | `true` / `false` | repeat frozen rows ทุกหน้า |
-| `fzc` | `true` / `false` | repeat frozen columns ทุกหน้า |
-| `attachment` | `true` / `false` | response เป็น attachment หรือ inline |
+| `range` | `A1:E20` | export only this range (omit = the whole sheet) |
+| `r1`, `c1`, `r2`, `c2` | row/col indices (0-based) | alternative to `range` |
+| `ir` | `false` | hide frozen rows when printing |
+| `ic` | `false` | hide frozen columns |
+| `fzr` | `true` / `false` | repeat frozen rows on every page |
+| `fzc` | `true` / `false` | repeat frozen columns on every page |
+| `attachment` | `true` / `false` | send the response as an attachment or inline |
 
-### ✓ Recipe ที่ใช้บ่อย
+### ✓ Recipe you will reuse most
 
 ```javascript
-// บันทึกหลังการสอน 1 หน้า A4 portrait fit-width
+// one A4 portrait page, fit-width — e.g. a lesson record
 function exportRecord_(ssId, gid, filename) {
   const params = {
     format: 'pdf',
@@ -443,7 +444,7 @@ function exportWithParams_(ssId, params, filename) {
     muteHttpExceptions: true,
   });
   if (resp.getResponseCode() !== 200) {
-    throw new Error('Export PDF ล้มเหลว: HTTP ' + resp.getResponseCode() + ' ' + resp.getContentText().substring(0, 200));
+    throw new Error('PDF export failed: HTTP ' + resp.getResponseCode() + ' ' + resp.getContentText().substring(0, 200));
   }
   return resp.getBlob().setName(filename + '.pdf');
 }
@@ -451,33 +452,33 @@ function exportWithParams_(ssId, params, filename) {
 
 ---
 
-## Rule #12: folder structure — เก็บ PDF แยกตาม owner
+## Rule #12: folder structure — store PDFs per owner
 
-**Why:** PDF กองรวมในโฟลเดอร์เดียวกัน → 10,000 ไฟล์ใน folder เดียวทำให้ Drive UI ช้า + แชร์ folder รายบุคคลกับ accountant/HR ไม่ได้
+**Why:** piling every PDF into one folder → 10,000 files in a single folder makes the Drive UI slow + you cannot share one person's folder with an accountant/HR
 
-### ✓ Good — โครงสร้าง 2 ระดับ
+### ✓ Good — a 2-level structure
 
 ```
 PDF_ROOT/
 ├── teacher1@school.ac.th/
-│   ├── ภาษาไทย-ป.1/         ← folder ของแต่ละวิชา/ชั้น
+│   ├── Thai-Grade1/         ← one folder per subject/class
 │   │   ├── REC1779902539479.pdf
 │   │   └── REC1779812345678.pdf
-│   └── คณิตศาสตร์-ป.1/
+│   └── Math-Grade1/
 └── teacher2@school.ac.th/
     └── ...
 ```
 
 ```javascript
 function getOrCreateRecordFolder_(teacherUser, record) {
-  // Layer 1: folder ของครู (= username/email)
+  // Layer 1: the teacher's folder (= username/email)
   const parentId = ensureTeacherParentFolder_(teacherUser.Username);
 
-  // Layer 2: folder ของวิชา-ชั้น (เก็บใน record.FolderID ที่ user สร้างไว้ตอน "สร้างโฟลเดอร์")
+  // Layer 2: the subject-class folder (stored in record.FolderID, which the user created via "Create folder")
   if (record.FolderID) {
     try { return DriveApp.getFolderById(record.FolderID).getId(); } catch (e) {}
   }
-  return parentId; // fallback — ใส่ใน parent folder ตรง ๆ
+  return parentId; // fallback — put it directly in the parent folder
 }
 
 function ensureTeacherParentFolder_(username) {
@@ -489,18 +490,18 @@ function ensureTeacherParentFolder_(username) {
 }
 ```
 
-**Cross-ref:** ดู `rules/drive-ops.md` Rule #1, #2 สำหรับ Config sheet + lazy folder creation
+**Cross-ref:** see `rules/drive-ops.md` Rule #1, #2 for the Config sheet + lazy folder creation
 
 ---
 
-## Rule #13: PDF filename — ใช้ RecordID ไม่ใช่ display name
+## Rule #13: PDF filename — use RecordID, not the display name
 
 ### ✗ Bad
 
 ```javascript
 file.setName(record.SubjectName + '-' + record.ClassLevel + '-' + record.Topic + '.pdf');
-// ไฟล์ชื่อซ้ำ ถ้าสอน "ภาษาไทย-ป.1-แผน 1" 2 ครั้ง
-// + character พิเศษใน Topic อาจ break URL/path
+// duplicate filenames when "Thai-Grade1-Lesson 1" is taught twice
+// + special characters in Topic can break the URL/path
 ```
 
 ### ✓ Good
@@ -508,20 +509,20 @@ file.setName(record.SubjectName + '-' + record.ClassLevel + '-' + record.Topic +
 ```javascript
 file.setName(record.RecordID + '.pdf'); // "REC1779902539479.pdf"
 file.setDescription(record.SubjectName + ' • ' + record.ClassLevel + ' • ' + record.Topic);
-// metadata อยู่ใน description — search ได้ใน Drive แต่ filename ไม่ชน
+// metadata lives in the description — searchable in Drive while the filename stays unique
 ```
 
 **Why:**
-- RecordID unique → ไม่ชน → ไม่ต้องเติม `(1)`, `(2)`
-- programmatic — script ลบ/หาไฟล์ตาม ID ได้
-- backward compatible ถ้า user ภายหลังเปลี่ยน Topic — filename เดิมยังหาเจอ
+- RecordID is unique → no collisions → no need for `(1)`, `(2)` suffixes
+- programmatic — scripts can find and delete files by ID
+- backward compatible if the user later changes Topic — the old filename is still found
 
-ถ้าอยากให้ user friendly เห็นชื่อสวย ๆ → ใช้ `file.setName(record.RecordID + ' - ' + safeFilename_(record.Topic) + '.pdf')`:
+If you want a friendlier, human-readable name → use `file.setName(record.RecordID + ' - ' + safeFilename_(record.Topic) + '.pdf')`:
 
 ```javascript
 function safeFilename_(s) {
   return String(s || '')
-    .replace(/[\\/:*?"<>|]/g, '')  // ห้ามใน Drive
+    .replace(/[\\/:*?"<>|]/g, '')  // forbidden in Drive
     .replace(/\s+/g, ' ')
     .trim()
     .substring(0, 100);

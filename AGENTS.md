@@ -9,7 +9,7 @@ Apply these rules when you detect any of:
 - Files with `.gs` extension
 - `appsscript.json` in project root
 - `.clasp.json` in project root
-- User mentions "Google Apps Script", "GAS", or "clasp" (or Thai: "แอปสคริปต์", "สคริปต์ชีต")
+- User mentions "Google Apps Script", "GAS", or "clasp"
 - Code uses `SpreadsheetApp`, `DriveApp`, `HtmlService`, `UrlFetchApp`, or other GAS services
 - `doGet` / `doPost` / `onEdit` / `onFormSubmit` handlers, or time-driven triggers
 - `google.script.run` calls in HTML files
@@ -33,7 +33,7 @@ When working on GAS code, consult `rules/<topic>.md` based on the task:
 | Year/month/enum dropdowns | `rules/dynamic-dropdowns.md` |
 | Auth, role check, OAuth scopes | `rules/security.md` |
 | Adding tables/columns to live system | `rules/schema-migrations.md` |
-| Error handling, Thai user messages | `rules/error-handling.md` |
+| Error handling and user-facing messages | `rules/error-handling.md` |
 | Custom Sheet menus | `rules/onopen-menu.md` |
 | Debug, log, execution history | `rules/testing-debugging.md` |
 | Log at RPC boundaries (client + server) | `rules/logging-boundaries.md` |
@@ -52,7 +52,7 @@ When working on GAS code, consult `rules/<topic>.md` based on the task:
 4. **Cache user lookups + computed results** via `CacheService.getScriptCache()` with explicit invalidation
 5. **Wrap concurrent mutations in `LockService.getScriptLock()`** with `try/finally { releaseLock() }`
 6. **Admin-editable values go in the Config sheet, secrets go in Script Properties** — never hardcoded
-7. **Thai user-facing error messages** + English `Logger.log` for developers
+7. **User-facing messages in the user's language** + English `Logger.log` for developers
 8. **Log every RPC boundary** — `console.log` in client, `Logger.log` in server (entry + exit)
 9. **Force text format for numeric fields with leading zeros** — phone, ID card, postal code (`setNumberFormat('@')` + apostrophe prefix)
 10. **Recompute critical values server-side** — never trust client-calculated percentages/totals
@@ -62,6 +62,6 @@ When working on GAS code, consult `rules/<topic>.md` based on the task:
 When suggesting GAS code:
 - Reference the rule number/file (e.g., "per `rules/spreadsheet-ops.md` Rule #2")
 - Show `✗ Bad` and `✓ Good` patterns when correcting common mistakes
-- Use Thai for user-facing error messages, English for log messages
+- Match user-facing message text to the end user's language; keep developer logs in English
 - Default to `let`/`const`, ES6+ (V8 runtime is standard now)
 - Suggest `LockService` for any function that mutates shared state

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
   <base target="_top">
   <meta charset="utf-8">
-  <!-- viewport ต้องอยู่ใน .html — rules/htmlservice-frontend.md Rule #1 -->
+  <!-- the viewport must live in the .html — rules/htmlservice-frontend.md Rule #1 -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ตัวอย่างระบบบันทึกข้อมูล</title>
+  <title>Example Record App</title>
   <style>
     body { font-family: sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
     input, button { font-size: 1rem; padding: .5rem; margin: .25rem 0; width: 100%; box-sizing: border-box; }
@@ -15,22 +15,22 @@
   </style>
 </head>
 <body>
-  <h1>ระบบบันทึกข้อมูล <small id="version"></small></h1>
+  <h1>Record App <small id="version"></small></h1>
 
   <!-- Login -->
   <div id="loginView">
-    <input id="username" placeholder="ชื่อผู้ใช้" autocomplete="username">
-    <input id="password" type="password" placeholder="รหัสผ่าน" autocomplete="current-password">
-    <button onclick="doLogin()">เข้าสู่ระบบ</button>
+    <input id="username" placeholder="Username" autocomplete="username">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button onclick="doLogin()">Log in</button>
     <p id="loginError" class="error"></p>
   </div>
 
   <!-- App -->
   <div id="appView" class="hidden">
-    <p>สวัสดี <b id="displayName"></b></p>
-    <input id="title" placeholder="ชื่อรายการ">
-    <input id="phone" placeholder="เบอร์โทร (เช่น 0812345678)">
-    <button onclick="doSave()">บันทึก</button>
+    <p>Hello <b id="displayName"></b></p>
+    <input id="title" placeholder="Record title">
+    <input id="phone" placeholder="Phone number (e.g. 0812345678)">
+    <button onclick="doSave()">Save</button>
     <p id="saveMsg"></p>
     <ul id="recordList"></ul>
   </div>
@@ -38,19 +38,19 @@
   <script>
     let sessionToken = null;
 
-    // wrapper เดียวใช้ทุก RPC — log boundary ฝั่ง client (rules/logging-boundaries.md)
+    // one wrapper for every RPC — client-side log boundary (rules/logging-boundaries.md)
     function rpc(fnName, ...args) {
       console.log('[rpc→]', fnName, args);
       return new Promise((resolve, reject) => {
         google.script.run
           .withSuccessHandler(res => {
             console.log('[rpc←]', fnName, res);
-            if (res && res.ok === false) reject(new Error(res.message || 'เกิดข้อผิดพลาด'));
+            if (res && res.ok === false) reject(new Error(res.message || 'Something went wrong'));
             else resolve(res);
           })
           .withFailureHandler(err => {
             console.error('[rpc✗]', fnName, err);
-            reject(new Error('เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่'));
+            reject(new Error('Connection failed, please try again'));
           })[fnName](...args);
       });
     }
@@ -73,7 +73,7 @@
 
     async function doSave() {
       const msg = document.getElementById('saveMsg');
-      msg.textContent = 'กำลังบันทึก...';
+      msg.textContent = 'Saving...';
       try {
         const res = await rpc('saveRecord', sessionToken, {
           title: document.getElementById('title').value,
@@ -96,9 +96,9 @@
         ul.innerHTML = '';
         res.data.forEach(r => {
           const li = document.createElement('li');
-          // CreatedAt เป็น ISO string — format ฝั่ง client ตาม locale
-          li.textContent = r.Title + ' — ' + new Date(r.CreatedAt).toLocaleString('th-TH');
-          ul.appendChild(li); // textContent ปลอดภัยจาก XSS — ห้ามใช้ innerHTML กับข้อมูล user
+          // CreatedAt is an ISO string — format it client-side for the locale
+          li.textContent = r.Title + ' — ' + new Date(r.CreatedAt).toLocaleString('en-US');
+          ul.appendChild(li); // textContent is XSS-safe — never use innerHTML with user data
         });
       } catch (err) {
         console.error(err);

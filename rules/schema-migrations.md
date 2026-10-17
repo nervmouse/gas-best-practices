@@ -1,8 +1,8 @@
-# Schema Migrations — เพิ่มตาราง/คอลัมน์โดยไม่พังของเก่า
+# Schema Migrations — Adding tables/columns without breaking existing data
 
-## Rule #1: idempotent `ensureSchema()` — รันกี่ครั้งก็ต้องปลอดภัย
+## Rule #1: idempotent `ensureSchema()` — must be safe no matter how many times it runs
 
-**Why:** clone โปรเจ็คใหม่ → ต้องรัน setup; deploy ใหม่ → ต้องเพิ่ม column ใหม่; user เก่าเปิด → ต้องไม่ทำลายของเก่า
+**Why:** cloning the project → setup has to run; a new deploy → new columns have to be added; an existing user opening it → nothing old must break
 
 ### ✓ Good — declarative schema + ensure helpers
 
@@ -40,7 +40,7 @@ function ensureSheet_(ss, name, headers) {
       .setFontWeight('bold').setBackground('#d81b60').setFontColor('white');
     sh.setFrozenRows(1);
   } else {
-    // เพิ่ม column ที่ขาดท้ายตาราง
+    // append any missing columns at the end of the table
     for (const h of headers) ensureColumn_(sh, h);
   }
   return sh;
@@ -57,7 +57,7 @@ function ensureColumn_(sheet, headerName) {
 
 ---
 
-## Rule #2: cache `ensureSchema()` per execution — ห้ามรันซ้ำใน function เดียว
+## Rule #2: cache `ensureSchema()` per execution — never run it twice inside one function
 
 ```javascript
 let _schemaEnsured = false;
@@ -68,22 +68,22 @@ function ensureSchemaCached_() {
   ensureSchema();
 }
 
-// เรียกที่ entry point ทุก function ที่ touch sheet
+// call this at the entry point of every function that touches a sheet
 function saveRecord(callerUserId, payload) {
   ensureSchemaCached_();
   // ...
 }
 ```
 
-**Why:** `ensureSchema()` อ่าน sheet หลายครั้ง — ถ้าทุก RPC call รัน 1 ครั้งก็เสีย ~500ms
+**Why:** `ensureSchema()` reads sheets many times — running it on every RPC call costs ~500ms each time
 
 ---
 
-## Rule #3: column ใหม่ — default value สำหรับ row เก่า
+## Rule #3: New column — a default value for old rows
 
-หลังเพิ่ม column ผ่าน `ensureColumn_` row เก่าจะมีค่าเป็น `''` (empty string)
+After `ensureColumn_` adds a column, old rows end up holding `''` (empty string)
 
-ถ้าต้อง default ไม่ใช่ empty:
+If the default must not be empty:
 
 ```javascript
 function migrateActiveColumn_(sheet) {
@@ -103,15 +103,15 @@ function migrateActiveColumn_(sheet) {
 }
 ```
 
-รันใน `ensureSchema()` ครั้งเดียวต่อ deploy (track ด้วย Config flag `MIGRATION_V2_DONE`)
+Run it inside `ensureSchema()` once per deploy (track it with the Config flag `MIGRATION_V2_DONE`)
 
 ---
 
-## Rule #4: rename column ห้ามทำตรง ๆ — เพิ่มใหม่ + copy + ลบทีหลัง
+## Rule #4: never rename a column in place — add the new one + copy + drop the old one later
 
 ```javascript
 function migrateRenameUsernameToEmail_(sheet) {
-  // Step 1 (deploy A): เพิ่ม Email column, copy จาก Username
+  // Step 1 (deploy A): add the Email column, copy it from Username
   ensureColumn_(sheet, 'Email');
   const usernameCol = colIndex_(sheet, 'Username');
   const emailCol = colIndex_(sheet, 'Email');
@@ -120,14 +120,14 @@ function migrateRenameUsernameToEmail_(sheet) {
     const values = sheet.getRange(2, usernameCol, lastRow - 1, 1).getValues();
     sheet.getRange(2, emailCol, lastRow - 1, 1).setValues(values);
   }
-  // Step 2 (deploy B หลัง code ไม่อ่าน Username แล้ว): ลบ Username
-  // ห้ามลบใน deploy เดียวกันกับ Step 1
+  // Step 2 (deploy B, once the code no longer reads Username): drop Username
+  // never drop it in the same deploy as Step 1
 }
 ```
 
 ---
 
-## Rule #5: track migration version ใน Config sheet
+## Rule #5: track the migration version in the Config sheet
 
 ```
 Config:
@@ -143,27 +143,27 @@ function ensureSchema() {
   if (current < 1) { migrateV1_(ss); setConfig_('SCHEMA_VERSION', '1'); }
   if (current < 2) { migrateV2_(ss); setConfig_('SCHEMA_VERSION', '2'); }
   if (current < 3) { migrateV3_(ss); setConfig_('SCHEMA_VERSION', '3'); }
-  // เพิ่ม migration ต่อท้าย — ห้ามแก้ของเก่า
+  // append new migrations at the end — never edit an existing one
 }
 ```
 
 ---
 
-## Rule #6: ไฟล์ template (PdfTemplate, sample, ฯลฯ) — สร้างจาก code ถ้าไม่มี
+## Rule #6: Template files (PdfTemplate, samples, etc.) — create them from code when missing
 
 ```javascript
 function ensurePdfTemplate_(ss) {
   let tpl = ss.getSheetByName('PdfTemplate');
   if (tpl) return tpl;
   tpl = ss.insertSheet('PdfTemplate');
-  tpl.getRange('A1').setValue('บันทึกหลังการสอน');
+  tpl.getRange('A1').setValue('Post-teaching record');
   tpl.getRange('A2').setValue('{{TERM_LABEL}}');
   // ...
   return tpl;
 }
 ```
 
-หรือ document ให้ admin import ผ่าน menu:
+Or ship a document the admin imports through a menu:
 
 ```javascript
 function onOpen() {
@@ -175,7 +175,7 @@ function onOpen() {
 
 ---
 
-## Rule #7: log migration เป็น Audit row
+## Rule #7: log each migration as an Audit row
 
 ```javascript
 function migrateV2_(ss) {
@@ -190,4 +190,4 @@ function migrateV2_(ss) {
 }
 ```
 
-ทำให้ debug หลัง deploy ง่าย — "ทำไม column นี้เกิดมาจากไหน"
+Makes post-deploy debugging easy — "where did this column come from?"

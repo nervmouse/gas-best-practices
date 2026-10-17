@@ -1,6 +1,6 @@
 # Examples
 
-โค้ดตัวอย่างที่ใช้ pattern ในกฎจริง — copy-paste แล้วปรับเป็น project ของคุณได้
+Example code that applies the patterns from the rules — copy-paste it and adapt it into your own project.
 
 ## Available
 
@@ -11,4 +11,4 @@
 - [ ] `pdf-from-template/` — template + placeholders + signature
 - [ ] `idempotent-schema/` — ensureSchema + migration version
 
-PR ยินดีรับ — ขนาดเล็ก เน้น 1 pattern ต่อตัวอย่าง
+PRs welcome — keep them small, one pattern per example.

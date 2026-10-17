@@ -1,21 +1,21 @@
 # Drive Operations
 
-**สารบัญ:**
+**Table of contents:**
 
-| Rule | เรื่อง |
+| Rule | Topic |
 |---|---|
-| #1 | เก็บ folder ID ใน Config sheet |
-| #2 | lazy creation — สร้างโฟลเดอร์อัตโนมัติ |
-| #3 | รูป signature/avatar คืน client เป็น base64 dataURL |
-| #4, #4.1 | sharing ANYONE_WITH_LINK + กรณีโดน domain policy block |
-| #5 | ลบไฟล์เก่าก่อน upload ใหม่ |
-| #6 | validate dataURL ฝั่ง server |
-| #7 | folder ของ user เก็บแยก |
-| #8 | scope ของ DriveApp: `drive` ไม่ใช่ `drive.file` |
+| #1 | store folder IDs in the Config sheet |
+| #2 | lazy creation — create folders automatically |
+| #3 | return signature/avatar images to the client as base64 dataURL |
+| #4, #4.1 | sharing ANYONE_WITH_LINK + the domain-policy-block case |
+| #5 | delete the old file before uploading a new one |
+| #6 | validate the dataURL server-side |
+| #7 | keep each user's folders separate |
+| #8 | DriveApp scope: `drive`, not `drive.file` |
 
-## Rule #1: เก็บ folder ID ใน Config sheet — ไม่ใช่ hardcode
+## Rule #1: store folder IDs in the Config sheet — never hardcode
 
-**Why:** ถ้า hardcode ใน script, redeploy ต้อง redeploy ใหม่ทุกครั้งที่ folder ย้าย — แก้ใน Config sheet ได้ทันที + คนใน wiki/admin sheet เห็นได้
+**Why:** hardcode them in the script and every folder move forces a fresh redeploy — edit the Config sheet instead and it takes effect immediately + anyone with wiki/admin sheet access can see it
 
 ### ✓ Good — Config sheet pattern
 
@@ -48,9 +48,9 @@ function getConfig_(key) {
 
 ---
 
-## Rule #2: lazy creation — สร้างโฟลเดอร์อัตโนมัติถ้ายังไม่มี
+## Rule #2: lazy creation — create the folder automatically if it does not exist
 
-**Why:** new clone ของ project ไม่ต้องมี admin มา setup ด้วยมือ
+**Why:** a fresh clone of the project should not require an admin to set it up by hand
 
 ```javascript
 function ensureSchema() {
@@ -81,13 +81,13 @@ function createDriveFolderIfMissing_(name) {
 
 ---
 
-## Rule #3: เก็บรูป signature/avatar เป็น base64 dataURL คืน client — อย่าใช้ Drive thumbnail URL
+## Rule #3: return signature/avatar images as base64 dataURL — do not use Drive thumbnail URLs
 
-**Bug จริง:** signature preview ในเว็บแอปแสดงไม่ขึ้น (broken image icon)
+**Real bug:** the signature preview in the web app does not render (broken image icon)
 
-**สาเหตุ:** Drive URL (`drive.google.com/uc?id=...` หรือ `lh3.googleusercontent.com/...`) ต้องการ OAuth cookie — เปิดใน `<img>` ของ web app ที่ deploy `executeAs: USER_DEPLOYING` จะถูก block CORS หรือคืน 403 (เพราะ end-user ไม่ได้ login Google ในแท็บนั้น หรือไม่มีสิทธิ์เข้า Drive)
+**Cause:** Drive URLs (`drive.google.com/uc?id=...` or `lh3.googleusercontent.com/...`) require an OAuth cookie — loaded in an `<img>` of a web app deployed with `executeAs: USER_DEPLOYING` they get blocked by CORS or return 403 (because the end user is not signed in to Google in that tab, or has no access to the Drive)
 
-### ✗ Bad — ให้ client load URL ตรง
+### ✗ Bad — let the client load the URL directly
 
 ```javascript
 // Server
@@ -97,7 +97,7 @@ return { ok: true, signatureUrl: 'https://drive.google.com/uc?id=' + fileId };
 <img src="https://drive.google.com/uc?id=..."> // 💥 broken
 ```
 
-### ✓ Good — server fetch blob แล้วคืน dataURL
+### ✓ Good — the server fetches the blob and returns a dataURL
 
 ```javascript
 // Server
@@ -118,84 +118,84 @@ function getMySignatureDataUrl(callerUserId) {
 // Client
 const res = await rpc('getMySignatureDataUrl', this.user.userId);
 if (res.ok && res.dataUrl) {
-  this.sigCurrentUrl = res.dataUrl; // ใช้กับ <img :src="sigCurrentUrl">
+  this.sigCurrentUrl = res.dataUrl; // use with <img :src="sigCurrentUrl">
 }
 ```
 
-**ข้อดี:**
-- ไม่ติด CORS — dataURL ฝังในหน้าเลย
-- ไม่ต้อง share file (file ยัง private อยู่)
-- ทำงานบน web app ทุก deployment mode
+**Pros:**
+- No CORS issues — the dataURL is embedded in the page
+- No need to share the file (it stays private)
+- Works on a web app in every deployment mode
 
-**ข้อเสีย:**
-- base64 ขนาดใหญ่กว่า binary ~33% — เหมาะกับรูปเล็ก (signature, avatar, logo) ไม่เหมาะกับรูปหลาย MB
-- ถ้าต้องโชว์รูปหลายร้อยรูปพร้อมกัน → cache dataURL ฝั่ง client หรือใช้ approach ต่อไป
+**Cons:**
+- base64 is ~33% larger than binary — fine for small images (signature, avatar, logo), not for multi-MB photos
+- if you need to show hundreds of images at once → cache the dataURL client-side or use the next approach
 
 ---
 
-## Rule #4: สำหรับรูปใหญ่/หลายรูป — share ANYONE_WITH_LINK + ใช้ direct URL
+## Rule #4: for large images / many images — share ANYONE_WITH_LINK + use a direct URL
 
 ```javascript
-// Server — set sharing หลังสร้าง
+// Server — set sharing after creating the file
 const file = folder.createFile(blob);
 try {
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 } catch (e) {
-  // domain policy block — ไฟล์ยังเซฟได้ แค่ public link ไม่ได้
+  // domain policy block — the file is still saved, just not publicly linkable
   Logger.log('[saveImage] setSharing failed (likely domain policy): ' + e.message);
 }
 
-// คืน thumbnail URL
+// return the thumbnail URL
 return {
   ok: true,
   thumbUrl: 'https://lh3.googleusercontent.com/d/' + file.getId() + '=w400',
-  // หรือ full URL
+  // or the full URL
   viewUrl: 'https://drive.google.com/file/d/' + file.getId() + '/view',
   downloadUrl: 'https://drive.google.com/uc?export=download&id=' + file.getId(),
 };
 ```
 
-**Trade-off:** anyone-with-link = ไม่ secret อีกแล้ว — ใช้ได้กับ user-generated content ที่ไม่ sensitive (รูปสินค้า, รูป cover) อย่าใช้กับเอกสารส่วนตัว
+**Trade-off:** anyone-with-link means the content is no longer secret — usable for non-sensitive user-generated content (product photos, cover images); never use it for personal documents
 
 ---
 
-## Rule #4.1: `setSharing(ANYONE_WITH_LINK)` แตกบน Google Workspace ของหน่วยงาน/โรงเรียน
+## Rule #4.1: `setSharing(ANYONE_WITH_LINK)` breaks on a school/organization Google Workspace
 
-**Bug จริง (case study):** โค้ดเดิมรัน OK บน Gmail ส่วนตัว → deploy ให้ครู deploy account `@school.ac.th` แล้วเด้ง:
+**Real bug (case study):** the original code runs fine on personal Gmail → deployed to a teacher whose deploy account is `@school.ac.th` and it throws:
 
 ```
-Exception: ไม่ได้รับอนุญาต (Permission denied): DriveApp
+Exception: Permission denied: DriveApp
 ```
 
-**สาเหตุ:** Google Workspace admin ของ org (โรงเรียน, หน่วยงานรัฐ, บริษัทใหญ่) ตั้ง policy "**Block external sharing**" หรือ "**Restrict to domain only**" — `ANYONE_WITH_LINK` คือ external = ถูกบล็อก → DriveApp throw ทันที
+**Cause:** the Google Workspace admin of the org (school, government agency, large company) set a "**Block external sharing**" or "**Restrict to domain only**" policy — `ANYONE_WITH_LINK` counts as external, so it gets blocked → DriveApp throws immediately
 
-User เห็น error ตอนกดบันทึก แอปพังทั้งระบบเพราะ exception bubble up ออก function
+Users see the error when they press save; the app breaks across the board because the exception bubbles up out of the function
 
-### ✗ Bad — assume sharing ทำได้ + throw บล็อกทั้งฟังก์ชัน
+### ✗ Bad — assume sharing works + a throw blocks the whole function
 
 ```javascript
 function uploadImageAndSave(...) {
   const file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); // 💥 throw
-  saveRowToSheet(file.getId(), file.getUrl()); // ไม่ถึงตรงนี้
+  saveRowToSheet(file.getId(), file.getUrl()); // never reached
 }
 ```
 
-### ✓ Good — wrap `setSharing` ใน try/catch + degrade gracefully
+### ✓ Good — wrap `setSharing` in try/catch + degrade gracefully
 
 ```javascript
 function uploadImageAndSave(callerUserId, base64, meta) {
   try {
     const file = folder.createFile(blob);
 
-    // ลอง public share — fail ก็ไม่เป็นไร ไฟล์ยังอยู่
+    // try public sharing — if it fails that is fine, the file still exists
     let publicUrl = '';
     try {
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       publicUrl = 'https://lh3.googleusercontent.com/d/' + file.getId() + '=w400';
     } catch (sharingErr) {
       Logger.log('[upload] setSharing blocked by domain policy: ' + sharingErr.message);
-      // fallback: คืน file ID แล้วให้ client ดึงผ่าน base64 RPC แทน
+      // fallback: return the file ID and let the client fetch it over the base64 RPC instead
     }
 
     saveRowToSheet(file.getId(), publicUrl);
@@ -206,16 +206,16 @@ function uploadImageAndSave(callerUserId, base64, meta) {
 }
 ```
 
-### ✓ Better — รู้ตั้งแต่ deploy ว่า domain block public sharing → ออกแบบไม่ใช้เลย
+### ✓ Better — know at deploy time that the domain blocks public sharing → design without it at all
 
-ถ้ารู้ว่า target user ทั้งหมดอยู่ใน domain เดียวกัน (โรงเรียน, บริษัท) → **ห้ามใช้ `ANYONE_WITH_LINK` ตั้งแต่แรก** ใช้ base64 dataURL ผ่าน RPC (Rule #3) หรือ share ภายใน domain เท่านั้น:
+If you know every target user is in the same domain (a school, a company) → **never use `ANYONE_WITH_LINK` in the first place**. Use base64 dataURL over RPC (Rule #3) or share inside the domain only:
 
 ```javascript
-// Share เฉพาะคนใน domain — policy อนุญาตปกติ
+// Share only within the domain — normally allowed by policy
 file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
 ```
 
-หรือ share เป็น user-specific:
+or share with specific users:
 
 ```javascript
 file.addViewer('supervisor@school.ac.th');
@@ -224,22 +224,23 @@ file.addViewer('supervisor@school.ac.th');
 ### Decision tree
 
 ```
-ต้องโชว์รูปในเว็บแอป?
-├── ใช่ + user ทุกคนอยู่ใน domain เดียวกัน
-│   └── ใช้ base64 dataURL ผ่าน RPC (Rule #3) — ไม่ต้อง share เลย
-├── ใช่ + user หลายโดเมน / external + รูปไม่ sensitive
-│   └── ลอง ANYONE_WITH_LINK + try/catch fallback
-├── ใช่ + รูป sensitive
-│   └── base64 dataURL + ตรวจสิทธิ์ทุก RPC call
-└── ไม่ — แค่เก็บใน Drive
-    └── createFile แล้วจบ — ไม่ต้อง setSharing
+Must the image be shown in the web app?
+├── Yes + every user is in the same domain
+│   └── Use base64 dataURL over RPC (Rule #3) — no sharing at all
+├── Yes + multiple/external domains + image is not sensitive
+│   └── Try ANYONE_WITH_LINK + try/catch fallback
+├── Yes + image is sensitive
+│   └── base64 dataURL + check permissions on every RPC call
+└── No — just store it in Drive
+    └── createFile and done — no setSharing needed
 ```
 
-### วิธี detect policy ก่อน
-ไม่มี GAS API ที่ query policy ตรง ๆ — practical:
-1. **Deploy แล้วลองด้วย test account ใน domain target** ดูว่า `setSharing` throw ไหม
-2. **เก็บ flag ใน Config sheet** `ALLOW_PUBLIC_SHARING = true/false` — ให้ admin toggle ตามจริง
-3. **try/catch + memoize** — ลองครั้งแรก fail ก็จำไว้ใน CacheService ทั้งวัน ไม่ต้องลองซ้ำ
+### How to detect the policy up front
+
+There is no GAS API that queries the policy directly — practical options:
+1. **Deploy and test with a test account in the target domain** to see whether `setSharing` throws
+2. **Store a flag in the Config sheet** `ALLOW_PUBLIC_SHARING = true/false` — let the admin toggle it to match reality
+3. **try/catch + memoize** — if the first attempt fails, remember it in CacheService for a whole day instead of retrying
 
 ```javascript
 function canPublicShare_() {
@@ -248,7 +249,7 @@ function canPublicShare_() {
   if (cached !== null) return cached === '1';
 
   try {
-    // ทดสอบกับไฟล์ dummy
+    // test with a dummy file
     const testFile = DriveApp.createFile('___test_share___', '');
     testFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     testFile.setTrashed(true);
@@ -263,47 +264,47 @@ function canPublicShare_() {
 
 ---
 
-## Rule #5: ลบไฟล์เก่าก่อน upload ใหม่ — กัน Drive รก
+## Rule #5: delete the old file before uploading a new one — keeps Drive tidy
 
 ```javascript
 function saveMySignature(callerUserId, base64DataUrl) {
   const caller = requireUser_(callerUserId);
   // ... validate ...
 
-  // ลบของเก่าก่อน
+  // delete the old one first
   if (caller.SignatureFileId) {
     try {
       DriveApp.getFileById(caller.SignatureFileId).setTrashed(true);
     } catch (e) {}
   }
 
-  // สร้างใหม่
+  // create the new one
   const folder = DriveApp.getFolderById(getConfig_('SIGNATURES_FOLDER_ID'));
   const file = folder.createFile(blob);
-  // อัพเดท ID ใน sheet
+  // update the ID in the sheet
   sheet.getRange(rowIndex, sigCol).setValue(file.getId());
 }
 ```
 
-**ใช้ `setTrashed(true)` ไม่ใช่ `.setTrashed(true).getId()` chain แล้วลืม** — bug เคยเจอ เพราะ method คืน File ไม่ใช่ void
+**Use `setTrashed(true)` on its own, not a `.setTrashed(true).getId()` chain** — this has caused real bugs, because the method returns a File, not void
 
 ---
 
-## Rule #6: validate dataURL ฝั่ง server ก่อนถอด base64
+## Rule #6: validate the dataURL server-side before decoding base64
 
 ```javascript
 function saveImage_(base64DataUrl, folderId, filename) {
   if (!base64DataUrl || base64DataUrl.indexOf('data:image/') !== 0) {
-    throw new Error('ข้อมูลรูปไม่ถูกต้อง');
+    throw new Error('invalid image data');
   }
   const m = base64DataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
-  if (!m) throw new Error('รูปแบบ base64 ผิด');
+  if (!m) throw new Error('invalid base64 format');
   const mime = m[1];
   const bytes = Utilities.base64Decode(m[2]);
 
-  // ขนาดสูงสุด 5MB
+  // max size 5MB
   if (bytes.length > 5 * 1024 * 1024) {
-    throw new Error('รูปใหญ่เกิน 5MB');
+    throw new Error('image larger than 5MB');
   }
 
   const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/png' ? 'png' : 'bin';
@@ -314,14 +315,14 @@ function saveImage_(base64DataUrl, folderId, filename) {
 
 ---
 
-## Rule #7: folder ของ user เก็บแยก — ไม่ใช่กองรวม
+## Rule #7: keep each user's folders separate — not one big pile
 
-ใน TEACHERS folder:
+Inside the TEACHERS folder:
 ```
 TEACHERS/
 ├── teacher1@email.com/
 │   ├── REC001.pdf
-│   └── ภาษาไทย-ป.1/
+│   └── Thai-Grade1/
 │       └── ...
 └── teacher2@email.com/
     └── ...
@@ -337,13 +338,13 @@ function ensureTeacherParentFolder_(username) {
 }
 ```
 
-ผลดี: ดู Drive แล้วเข้าใจทันที + แชร์ folder รายบุคคลกับ accountant/HR ได้
+Benefit: browsing Drive becomes self-explanatory + you can share one person's folder with an accountant/HR
 
 ---
 
-## Rule #8: scope ของ DriveApp — ใช้ `drive` ไม่ใช่ `drive.file`
+## Rule #8: DriveApp scope — use `drive`, not `drive.file`
 
-**Bug ที่เจอจริง:** แอปถ่ายรูปแล้วเก็บเข้า Drive ประกาศ scope แคบ ๆ ตามหลัก "ขอเท่าที่ใช้":
+**Real bug:** an app that takes photos and stores them in Drive declared the narrowest scopes possible, following the "request only what you use" principle:
 
 ```json
 "oauthScopes": [
@@ -352,13 +353,13 @@ function ensureTeacherParentFolder_(username) {
 ]
 ```
 
-พอกดบันทึกรูป `DriveApp.createFolder()` (Rule #2) ล้มทันที:
+The moment a photo is saved, `DriveApp.createFolder()` (Rule #2) fails immediately:
 
 ```
-สิทธิ์ที่ระบุไว้ไม่เพียงพอที่จะเรียกใช้ DriveApp.createFolder สิทธิ์ที่จำเป็นคือ https://www.googleapis.com/auth/drive
+The declared scopes are not sufficient to call DriveApp.createFolder. The required scope is https://www.googleapis.com/auth/drive
 ```
 
-**ทำไม:** `drive.file` จำกัดให้เข้าถึงเฉพาะไฟล์ที่แอปสร้างเอง แต่ `DriveApp` ไม่รองรับ scope นี้เลย — reference ของ `DriveApp` ระบุ scope ของ `createFile` และ `createFolder` ไว้แค่ `https://www.googleapis.com/auth/drive` ตัวเดียว
+**Why:** `drive.file` limits access to files the app created itself, but `DriveApp` does not support that scope at all — the `DriveApp` reference lists `https://www.googleapis.com/auth/drive` as the scope for both `createFile` and `createFolder`, with no alternative
 
 ### ✓ Good
 
@@ -369,11 +370,11 @@ function ensureTeacherParentFolder_(username) {
 ]
 ```
 
-| ใช้ DriveApp ทำอะไร | scope |
+| What you use DriveApp for | scope |
 |---|---|
-| เขียน: `createFile`, `createFolder`, `Folder.createFile`, `setSharing`, `setTrashed` | `drive` |
-| อ่านอย่างเดียว: `getFileById`, `getFolderById`, `getBlob` | `drive.readonly` |
+| Write: `createFile`, `createFolder`, `Folder.createFile`, `setSharing`, `setTrashed` | `drive` |
+| Read only: `getFileById`, `getFolderById`, `getBlob` | `drive.readonly` |
 
-- ตอน authorize Google จะเตือนว่าแอปเข้าถึง Drive ทั้งหมด — เป็นข้อจำกัดของ `DriveApp` ไม่ใช่ความผิดของโค้ด
-- ถ้าต้องการ `drive.file` จริง ๆ ต้องไม่ใช้ `DriveApp` แต่เรียก Drive REST API เอง (`UrlFetchApp` + `ScriptApp.getOAuthToken()` + scope `script.external_request`) หรือใช้ Advanced Drive Service ซึ่งต้องเปิด API เพิ่ม
-- เพิ่ม scope ทีหลัง = เจ้าของต้องกด authorize ใหม่หนึ่งครั้ง ก่อนผู้ใช้คนอื่นจะใช้ฟีเจอร์นั้นได้
+- During authorization Google warns that the app can reach all of Drive — that is a limitation of `DriveApp`, not a mistake in your code
+- If you really need `drive.file`, do not use `DriveApp` — call the Drive REST API yourself (`UrlFetchApp` + `ScriptApp.getOAuthToken()` + scope `script.external_request`) or use the Advanced Drive Service, which requires enabling extra APIs
+- Adding a scope later = the owner has to re-authorize once before other users can use that feature

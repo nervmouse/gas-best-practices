@@ -1,51 +1,59 @@
 # Contributing
 
-ขอบคุณที่สนใจ contribute! กฎใหม่ ๆ ที่ดีที่สุดมาจากบักจริง — ถ้าคุณเคย debug GAS แล้วใช้เวลามากเกินที่ควร นั่นแหละคือเนื้อหากฎที่ดี
+Thanks for wanting to contribute! The best new rules come from real bugs — if you have ever spent longer debugging GAS than it should have taken, that is exactly the material a good rule is made of.
 
-## วิธีเพิ่ม rule ใหม่
+## How to add a new rule
 
-1. สร้างไฟล์ใหม่ใน `rules/<หมวด>.md` หรือเพิ่ม rule ใน file ที่มีอยู่
-2. ทำตามแม่แบบนี้:
+1. Create a new file at `rules/<topic>.md`, or add a rule to an existing file
+2. Follow this template:
 
 ```markdown
-## Rule #N: <กฎสั้น ๆ ประโยคเดียว>
+## Rule #N: <one short sentence stating the rule>
 
-**Why:** <เหตุผล — bug จริง / pitfall / quota limit>
+**Why:** <reason — a real bug / pitfall / quota limit>
 
 ### ✗ Bad
 
 \`\`\`javascript
-// โค้ดที่ทำให้พัง พร้อม comment ระบุว่าตรงไหนพัง
+// code that breaks, with a comment pointing at what breaks
 \`\`\`
 
 ### ✓ Good
 
 \`\`\`javascript
-// pattern ที่ใช้ได้จริง
+// the pattern that actually works
 \`\`\`
 
-**Edge case:** <ข้อยกเว้น / trade-off / when not to apply — ถ้ามี>
+**Edge case:** <exception / trade-off / when not to apply — if any>
 ```
 
-3. update `README.md` table + `SKILL.md` mapping ถ้าเพิ่ม file ใหม่
-4. ส่ง PR พร้อมระบุ:
-   - บริบทที่เจอบัก (production / dev / ขนาดงาน)
-   - error message ตัวจริง (ถ้ามี)
-   - ลิงก์ docs ของ Google ที่เกี่ยวข้อง
+3. Update the `README.md` table + the `SKILL.md` mapping if you add a file
+4. Open a PR describing:
+   - The context where you hit the bug (production / dev / scale of the job)
+   - The actual error message, if you have it
+   - Links to the relevant Google documentation
 
-## หลักการเขียน rule
+## Rule-writing principles
 
-- **เฉพาะเจาะจง > ทั่วไป** — "ห้าม setValues บน sheet ที่มี merged cells" ดีกว่า "ระวัง setValues"
-- **มีเหตุผล** — ทำไม ไม่ใช่แค่ทำไง
-- **มีโค้ดทั้ง bad + good** — copy-paste ใช้ได้เลย
-- **trigger keyword ใน description** ของ SKILL.md frontmatter เพื่อให้ Claude ค้นเจอ
+- **Specific beats general** — "do not call `setValues` on a sheet with merged cells" is better than "be careful with setValues"
+- **Explain why, not just how** — the reason is what stops the agent from re-introducing the bug
+- **Ship both bad and good code** — it should be copy-pasteable as-is
+- **Put trigger keywords in the `description`** of the SKILL.md frontmatter so the agent can find the skill
 
-## กฎที่ "ไม่ควรเพิ่ม"
+## Rules that should NOT be added
 
-- กฎทั่วไปของ JavaScript (ห้าม `var`, ใช้ `===`) — ไม่เฉพาะ GAS
-- กฎที่ขัดกับ official docs ของ Google โดยไม่มีหลักฐาน
-- กฎที่ตั้งจากความชอบส่วนตัว — ต้องมีเหตุผลเชิงเทคนิคหรือ user-facing
+- General JavaScript rules (no `var`, use `===`) — they are not GAS-specific
+- Rules that contradict Google's official docs without evidence
+- Rules based on personal preference — there must be a technical or user-facing reason
+
+## Language
+
+This repository is written in **English only**. Rules, examples, and comments must be
+written in English, and user-facing message strings in examples must be English as well.
+The underlying principle the rules teach — *match the message to the user's language* —
+still applies to the code an agent generates for a non-English product; only this
+repository's own content is English-only.
 
 ## License
 
-PR ที่ merge จะอยู่ภายใต้ MIT license เดียวกับ repo
+Merged PRs fall under the same MIT license as the repository.

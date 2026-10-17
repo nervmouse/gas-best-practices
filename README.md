@@ -1,226 +1,194 @@
 # gas-best-practices
 
-> Claude Code skill — Google Apps Script best practices distilled from real production bugs.
+> Agent skill — Google Apps Script best practices distilled from real production bugs.
 >
-> Claude Code skill รวมแนวปฏิบัติที่ดีสำหรับ Google Apps Script — สังเคราะห์จาก bug จริงใน production
+> Use it with Claude Code, OpenCode, Cursor, Codex, or any other agent so it follows
+> production-tested patterns when writing or reviewing GAS code.
 
-Use with [Claude Code](https://claude.com/claude-code) so that Claude follows production-tested patterns when writing or reviewing GAS code.
-
-ใช้กับ [Claude Code](https://claude.com/claude-code) เพื่อให้ Claude แนะนำ/แก้ไขโค้ด GAS ตาม pattern ที่ผ่านการใช้งานจริงในระบบ production
+Distilled from bugs that actually shipped to production: merged-cell write failures,
+signature images that rendered as broken icons in PDFs, optimistic locks that wiped
+179 bookings, and a 6-minute batch job that died halfway with half the data written.
 
 ---
 
-## 📦 Installation / วิธีติดตั้ง
+## 📦 Installation
 
-### English
+### Option 1 — `npx skills` (works with 75+ agents, recommended)
 
-#### Option 1 — Mac / Linux (one-liner)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/install.sh | bash
-```
-
-#### Option 2 — Windows PowerShell (one-liner)
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/install.ps1 | iex
-```
-
-#### Option 3 — Manual git clone (any OS)
+The [skills](https://github.com/vercel-labs/skills) CLI detects your installed agents
+and links the skill into each one.
 
 ```bash
-git clone https://github.com/kpcrmv4/gas-best-practices ~/.claude/skills/gas-best-practices
+# preview what will be installed
+npx skills add nervmouse/gas-best-practices --list
+
+# install to every detected agent
+npx skills add nervmouse/gas-best-practices -y
+
+# install to a specific agent, globally (available in all projects)
+npx skills add nervmouse/gas-best-practices -a claude-code -g -y
+npx skills add nervmouse/gas-best-practices -a opencode -g -y
+
+# copy the files instead of symlinking (needed on Windows without Developer Mode)
+npx skills add nervmouse/gas-best-practices -a claude-code --copy
 ```
 
-For Windows without `~`:
+Installed paths per agent:
+
+| Agent | `--agent` | Project path | Global path |
+|---|---|---|---|
+| Claude Code | `claude-code` | `.claude/skills/` | `~/.claude/skills/` |
+| OpenCode | `opencode` | `.agents/skills/` | `~/.config/opencode/skills/` |
+| Cursor | `cursor` | `.agents/skills/` | `~/.cursor/skills/` |
+| Codex | `codex` | `.agents/skills/` | `~/.agents/skills/` |
+| Cline | `cline` | `.agents/skills/` | `~/.agents/skills/` |
+| Gemini CLI | `gemini-cli` | `.agents/skills/` | `~/.gemini/skills/` |
+| GitHub Copilot | `github-copilot` | `.agents/skills/` | `~/.copilot/skills/` |
+| Continue | `continue` | `.continue/skills/` | `~/.continue/skills/` |
+| Windsurf | `windsurf` | `.windsurf/skills/` | `~/.codeium/windsurf/skills/` |
+
+> **Requires Node.js >= 22.20.0.** The `skills` CLI declares that engine requirement;
+> on Node 20 it fails with `SyntaxError: node:util does not provide an export named 'styleText'`.
+> On Node 20, use Option 2 or 3 instead.
+
+Update or remove it later:
+
+```bash
+npx skills list                    # list installed skills
+npx skills update gas-best-practices -y
+npx skills remove gas-best-practices -y
+```
+
+### Option 2 — Claude Code one-liner
+
+macOS / Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/install.sh | bash
+```
+
+Windows PowerShell:
 
 ```powershell
-git clone https://github.com/kpcrmv4/gas-best-practices "$HOME\.claude\skills\gas-best-practices"
+iwr -useb https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/install.ps1 | iex
 ```
 
-#### Verify installation
+### Option 3 — Manual git clone (any OS, any agent)
+
+```bash
+git clone https://github.com/nervmouse/gas-best-practices ~/.claude/skills/gas-best-practices
+```
+
+Windows, where `~` is not expanded:
+
+```powershell
+git clone https://github.com/nervmouse/gas-best-practices "$HOME\.claude\skills\gas-best-practices"
+```
+
+### Verify installation
 
 ```bash
 ls ~/.claude/skills/gas-best-practices
 # should show: SKILL.md, rules/, README.md, ...
 ```
 
-Then **restart Claude Code**. The skill will auto-trigger when:
+Then **restart your agent** to load the skill. It auto-triggers when:
+
 - Your project contains `.clasp.json` or `appsscript.json`
 - You edit `.gs` or `.js` files in a clasp project
 - You mention "Google Apps Script", "GAS", or "clasp" in a prompt
 
-#### Check status
+### Check status
 
 ```bash
-bash ~/.claude/skills/gas-best-practices/check.sh
+bash ~/.claude/skills/gas-best-practices/check.sh        # macOS / Linux
+& "$HOME\.claude\skills\gas-best-practices\check.ps1"     # Windows PowerShell
 ```
 
-Shows current version, rules count, and whether updates are available.
+Shows the current version, rule count, and whether updates are available.
 
-#### Update to latest
+### Update to latest
 
 ```bash
-bash ~/.claude/skills/gas-best-practices/update.sh
+bash ~/.claude/skills/gas-best-practices/update.sh        # macOS / Linux
+& "$HOME\.claude\skills\gas-best-practices\update.ps1"     # Windows PowerShell
 ```
 
-Or manually:
+Or manually, for a manual clone:
 
-```bash
-cd ~/.claude/skills/gas-best-practices && git pull
-```
-
-#### Uninstall
-
-```bash
-rm -rf ~/.claude/skills/gas-best-practices
-```
-
----
-
-### ภาษาไทย
-
-#### วิธีที่ 1 — Mac / Linux (คำสั่งเดียวจบ)
-
-เปิด Terminal แล้ววาง:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/install.sh | bash
-```
-
-#### วิธีที่ 2 — Windows PowerShell (คำสั่งเดียวจบ)
-
-เปิด PowerShell (กด `Win + X` → Terminal/PowerShell) แล้ววาง:
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/install.ps1 | iex
-```
-
-#### วิธีที่ 3 — Manual ด้วย git clone (ทุก OS)
-
-```bash
-git clone https://github.com/kpcrmv4/gas-best-practices ~/.claude/skills/gas-best-practices
-```
-
-Windows ถ้าใช้ `~` ไม่ได้:
-
-```powershell
-git clone https://github.com/kpcrmv4/gas-best-practices "$HOME\.claude\skills\gas-best-practices"
-```
-
-#### ตรวจสอบว่าติดตั้งสำเร็จ
-
-```bash
-ls ~/.claude/skills/gas-best-practices
-# ต้องเห็น: SKILL.md, rules/, README.md, ...
-```
-
-จากนั้น **ปิดและเปิด Claude Code ใหม่** เพื่อโหลด skill
-
-Skill จะถูกเรียกใช้อัตโนมัติเมื่อ:
-- โปรเจ็คที่เปิดอยู่มีไฟล์ `.clasp.json` หรือ `appsscript.json`
-- คุณกำลังแก้ไฟล์ `.gs` หรือ `.js` ในโปรเจ็ค clasp
-- คุณพิมพ์ prompt ที่มีคำว่า "Google Apps Script", "GAS", หรือ "clasp"
-
-#### เช็คสถานะ + ดูว่ามีอัพเดทไหม
-
-Mac / Linux:
-```bash
-bash ~/.claude/skills/gas-best-practices/check.sh
-```
-
-Windows PowerShell:
-```powershell
-& "$HOME\.claude\skills\gas-best-practices\check.ps1"
-```
-
-จะแสดง version ปัจจุบัน, จำนวน rules, และบอกถ้ามี commit ใหม่ใน GitHub
-
-#### อัพเดตเป็นเวอร์ชันล่าสุด
-
-Mac / Linux:
-```bash
-bash ~/.claude/skills/gas-best-practices/update.sh
-```
-
-Windows PowerShell:
-```powershell
-& "$HOME\.claude\skills\gas-best-practices\update.ps1"
-```
-
-หรือทำเองด้วย git:
 ```bash
 cd ~/.claude/skills/gas-best-practices && git pull
 ```
 
-หลังอัพเดต — **restart Claude Code** เพื่อโหลด skill เวอร์ชันใหม่
+After updating — **restart your agent** to load the new version.
 
-#### ถอนการติดตั้ง
+### Uninstall
 
-Mac / Linux:
 ```bash
-rm -rf ~/.claude/skills/gas-best-practices
+rm -rf ~/.claude/skills/gas-best-practices                          # macOS / Linux
+Remove-Item -Recurse -Force "$HOME\.claude\skills\gas-best-practices"   # Windows PowerShell
 ```
 
-Windows PowerShell:
-```powershell
-Remove-Item -Recurse -Force "$HOME\.claude\skills\gas-best-practices"
+Or, if installed with the `skills` CLI:
+
+```bash
+npx skills remove gas-best-practices -y
 ```
 
 ---
 
-## 🔍 ทดสอบว่าใช้งานได้
+## 🔍 Test that it works
 
-หลัง install เสร็จ ลองเปิดโปรเจ็ค GAS แล้วถาม Claude:
+Open a GAS project and ask your agent:
 
-> "ช่วยตรวจ Code.gs หน่อย"
+> "Review Code.gs for me"
 
-Claude ควรอ้างถึง pattern จาก skill นี้ (เช่น แนะนำให้ใช้ `Result envelope`, `LockService`, `Logger.log` boundary)
+The agent should cite patterns from this skill — for example recommending a `Result`
+envelope, `LockService`, or `Logger.log` at RPC boundaries.
 
 ---
 
-## 🤖 ใช้กับ AI tool อื่น (ไม่ใช่แค่ Claude Code)
+## 🤖 Using it with other AI tools
 
-Skill นี้ออกแบบให้ทำงานกับ Claude Code โดยตรง — แต่ **เนื้อหา rule ใน `rules/` เป็น markdown ธรรมดา** ใช้กับ AI tool ตัวอื่นได้ทั้งหมด
+The rules in `rules/` are plain markdown, so they work with any tool. `npx skills`
+(the install above) covers 75+ agents automatically. The rest of this section covers
+tools that do not read skills at all.
 
-### Cursor / Windsurf / Cline
-
-Clone repo เข้าไปในโปรเจ็ค หรือ copy ไฟล์ `.cursorrules` / `.windsurfrules` / `.clinerules` จาก repo นี้ไปวางใน root ของโปรเจ็คคุณ:
+### Cursor / Windsurf / Cline (legacy rule files)
 
 ```bash
-curl -O https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/.cursorrules
+curl -O https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/.cursorrules
 ```
 
-แล้ว AI ของ tool นั้นจะอ่านอัตโนมัติเวลาคุณเปิดโปรเจ็ค (ต้อง clone repo ไว้ใกล้ ๆ เพื่อให้ AI access `rules/*.md` ได้)
+Then commit the repo (or a copy of `rules/`) next to your project so the agent can
+read `rules/*.md`.
 
-### ChatGPT / Claude.ai web / Gemini
+### ChatGPT / Claude.ai web / Gemini chat
 
-ใช้ไฟล์ **`PROMPT.md`** ที่รวมทุก rule ในไฟล์เดียว:
+Use **`PROMPT.md`**, which bundles every rule into a single file:
 
-1. ดาวน์โหลด: <https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/PROMPT.md>
-2. Copy เนื้อหาทั้งหมด
-3. วางใน:
+1. Download: <https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/PROMPT.md>
+2. Copy the whole file
+3. Paste it into:
    - **ChatGPT Custom GPT** → Instructions field
    - **ChatGPT Project** → Project knowledge
    - **Claude.ai Project** → Project knowledge / custom instructions
    - **Gemini Gem** → Instructions
 
-ขนาดประมาณ 4,700 บรรทัด (~110KB) — พอดีกับ context window ของโมเดลหลักทุกตัวในปัจจุบัน
+It is roughly 5,100 lines (~172 KB) — small enough for the context window of every
+current mainstream model.
 
-> `PROMPT.md` เป็นไฟล์ generate อัตโนมัติจาก `build.sh` — แก้เนื้อหาที่ `rules/*.md` แล้วรัน `./build.sh` เท่านั้น
-
-### Gemini Code Assist / OpenCode
-
-อ่านไฟล์ **`AGENTS.md`** อัตโนมัติ — clone repo เข้าโปรเจ็คก็ใช้ได้
+> `PROMPT.md` is generated automatically by `build.sh` — edit `rules/*.md` and re-run
+> `./build.sh`. CI fails the PR if it is out of sync.
 
 ### GitHub Copilot
 
-Copilot ไม่อ่าน external rule files แต่อ่าน `.github/copilot-instructions.md` ได้:
+Copilot does not read external rule files, but it does read `.github/copilot-instructions.md`:
 
 ```bash
 mkdir -p .github
 curl -o .github/copilot-instructions.md \
-  https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/AGENTS.md
+  https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/AGENTS.md
 ```
 
 ### Aider
@@ -232,7 +200,7 @@ aider --read /path/to/gas-best-practices/AGENTS.md \
 
 ### Continue.dev
 
-ใน `.continue/config.json`:
+In `.continue/config.json`:
 
 ```json
 {
@@ -247,112 +215,118 @@ aider --read /path/to/gas-best-practices/AGENTS.md \
 }
 ```
 
-### สรุปไฟล์ที่ใช้กับแต่ละ AI
+### Which file to use with which tool
 
-| AI tool | ไฟล์ที่ใช้ |
+| AI tool | File to use |
 |---|---|
-| **Claude Code** (recommended) | `SKILL.md` (auto-loaded จาก `~/.claude/skills/`) |
-| Cursor | `.cursorrules` |
-| Windsurf | `.windsurfrules` |
-| Cline | `.clinerules` |
-| Gemini Code Assist / OpenCode | `AGENTS.md` |
+| **Any skills agent** (recommended) | `npx skills add nervmouse/gas-best-practices` |
+| **Claude Code** | `SKILL.md` (auto-loaded from `~/.claude/skills/`) |
+| **OpenCode** / **Gemini Code Assist** | `AGENTS.md` (read automatically) |
+| Cursor (legacy) | `.cursorrules` |
+| Windsurf (legacy) | `.windsurfrules` |
+| Cline (legacy) | `.clinerules` |
 | GitHub Copilot | copy `AGENTS.md` → `.github/copilot-instructions.md` |
 | Aider | `--read AGENTS.md --read rules/*.md` |
-| Continue.dev | `PROMPT.md` ใน config |
-| ChatGPT / Claude.ai web / Gemini chat | `PROMPT.md` paste ใน custom instructions/project knowledge |
+| Continue.dev | `PROMPT.md` in config |
+| ChatGPT / Claude.ai web / Gemini chat | paste `PROMPT.md` into custom instructions / project knowledge |
 
-## เนื้อหา
+## Contents
 
-| Rule file | สิ่งที่ครอบคลุม |
+| Rule file | What it covers |
 |---|---|
 | [project-structure.md](rules/project-structure.md) | clasp, appsscript.json, file split, naming |
-| [spreadsheet-ops.md](rules/spreadsheet-ops.md) | bulk read/write, merged cells gotcha, column index, % handling |
+| [spreadsheet-ops.md](rules/spreadsheet-ops.md) | bulk read/write, merged-cell gotcha, column index, % handling |
 | [web-app-rpc.md](rules/web-app-rpc.md) | `google.script.run`, Result envelope, bundling, optimistic updates |
 | [htmlservice-frontend.md](rules/htmlservice-frontend.md) | viewport meta, `createHtmlOutputFromFile`, partial include, template syntax, mobile debug |
 | [external-frontend.md](rules/external-frontend.md) | GitHub Pages/Netlify + GAS API, camera capture, CORS workaround (text/plain), session token, PWA |
 | [pdf-generation.md](rules/pdf-generation.md) | template placeholders, signature anchor, image trim, business guard |
 | [drive-ops.md](rules/drive-ops.md) | Config sheet, lazy folder creation, **signature preview via base64**, sharing |
 | [lock-service.md](rules/lock-service.md) | concurrency control, timeout choice, finally release |
-| [cache-service.md](rules/cache-service.md) | TTL strategy, invalidation, size limits, cache key ผูก code version |
-| [data-integrity.md](rules/data-integrity.md) | บังคับ `rev`, circuit breaker กันลบยกชุด, ห้าม client ทับ field ของ server, ตรวจ "ตัวตน" ไม่ใช่ยอดรวม |
-| [dynamic-dropdowns.md](rules/dynamic-dropdowns.md) | ปี/เดือน/ค่า enum ที่ไม่ฟิกตายตัว, datalist pattern |
+| [cache-service.md](rules/cache-service.md) | TTL strategy, invalidation, size limits, cache key bound to the code version |
+| [data-integrity.md](rules/data-integrity.md) | mandatory `rev`, circuit breaker against bulk deletes, no client overwrite of server fields, verify identity rather than totals |
+| [dynamic-dropdowns.md](rules/dynamic-dropdowns.md) | year/month/enum dropdowns that are not hardcoded, datalist pattern |
 | [security.md](rules/security.md) | requireUser/Role, session tokens, password hashing, OAuth scope |
 | [schema-migrations.md](rules/schema-migrations.md) | idempotent ensureSchema, column add, version tracking |
-| [error-handling.md](rules/error-handling.md) | Result envelope, Thai user msg, translate GAS errors, retry |
+| [error-handling.md](rules/error-handling.md) | Result envelope, user-facing message in the user's language, translate GAS errors, retry |
 | [onopen-menu.md](rules/onopen-menu.md) | custom menu, separators, toast vs alert, sub-menu |
 | [testing-debugging.md](rules/testing-debugging.md) | Logger.log pattern, e2e via doPost, timing, quota |
-| [logging-boundaries.md](rules/logging-boundaries.md) | log ที่ RPC boundary (client+server), mask sensitive, copy-debug-info UX, version stamp |
-| [triggers.md](rules/triggers.md) | time-driven/installable triggers, กัน trigger ซ้ำ, onFormSubmit (namedValues), สิทธิ์ trigger |
+| [logging-boundaries.md](rules/logging-boundaries.md) | log at the RPC boundary (client + server), mask sensitive values, copy-debug-info UX, version stamp |
+| [triggers.md](rules/triggers.md) | time-driven / installable triggers, duplicate-trigger prevention, onFormSubmit (namedValues), trigger authorization |
 | [urlfetch-external-api.md](rules/urlfetch-external-api.md) | muteHttpExceptions, retry+backoff, fetchAll, LINE Messaging API, quota |
 | [deployment-versioning.md](rules/deployment-versioning.md) | /dev vs /exec, clasp deploy -i, rollback, .claspignore, version stamp |
-| [long-running-jobs.md](rules/long-running-jobs.md) | ทะลุ 6-minute limit — checkpoint + continuation trigger, submit+poll |
+| [long-running-jobs.md](rules/long-running-jobs.md) | getting past the 6-minute limit — checkpoint + continuation trigger, submit+poll |
 | [email-notifications.md](rules/email-notifications.md) | MailApp vs GmailApp, quota email, throttled error alert |
-| [properties-service.md](rules/properties-service.md) | Script/User/Document properties, เกณฑ์เลือก vs Config sheet |
+| [properties-service.md](rules/properties-service.md) | Script/User/Document properties, criteria for Properties vs Config sheet |
 
-## Bugs จริงที่กฎเหล่านี้ป้องกัน
+## Real bugs these rules prevent
 
-- 🐛 **"ข้อผิดพลาดของบริการ: สเปรดชีต"** ตอน `range.setValues()` บน template ที่มี merged cells → [spreadsheet-ops.md](rules/spreadsheet-ops.md)
-- 🐛 **PassPercent = 500%** เพราะ client คำนวณผิด server เชื่อตรง ๆ → [spreadsheet-ops.md](rules/spreadsheet-ops.md) Rule #8
-- 🐛 **Signature preview broken image** เพราะใช้ Drive URL ตรง ไม่ได้แปลงเป็น base64 → [drive-ops.md](rules/drive-ops.md) Rule #3
-- 🐛 **Signature ทับแถวอื่นใน PDF** เพราะรูปยังมี whitespace + ไม่ตั้ง anchor offset → [pdf-generation.md](rules/pdf-generation.md) Rule #4, #6
-- 🐛 **ปี dropdown หมดอายุปี 2026** เพราะ hardcode 2024-2026 → [dynamic-dropdowns.md](rules/dynamic-dropdowns.md)
-- 🐛 **Lock ค้าง 6 นาที** เพราะลืม `finally { releaseLock() }` → [lock-service.md](rules/lock-service.md) Rule #4
-- 🐛 **PDF gen ของ 2 คนพร้อมกัน → temp sheet ชื่อชน** → [lock-service.md](rules/lock-service.md)
-- 🐛 **"ไม่ได้รับอนุญาต (Permission denied): DriveApp"** บน Google Workspace ของโรงเรียน/หน่วยงาน เพราะ `setSharing(ANYONE_WITH_LINK)` ถูก domain policy block → [drive-ops.md](rules/drive-ops.md) Rule #4.1
-- 🐛 **เว็บแอปบนมือถือไม่ responsive** เพราะ AI ใส่ viewport meta tag ใน `.gs` แทน `.html` → [htmlservice-frontend.md](rules/htmlservice-frontend.md) Rule #1
-- 🐛 **เบอร์โทร `0812345678` กลายเป็น `812345678`** เพราะ Sheets autoparse เป็น number — ต้อง `setNumberFormat('@')` หรือ prefix `'` → [spreadsheet-ops.md](rules/spreadsheet-ops.md) Rule #6.6
-- 🐛 **Date object ส่งจาก server มา client แล้วเป็น `{}`** เพราะ `google.script.run` ไม่ serialize Date → [spreadsheet-ops.md](rules/spreadsheet-ops.md) Rule #6.1
-- 🐛 **`getUserMedia` ใช้ไม่ได้ในเว็บแอป** เพราะ GAS iframe block — ต้องย้าย frontend ไป GitHub Pages → [external-frontend.md](rules/external-frontend.md)
-- 🐛 **fetch GAS แล้ว CORS error** เพราะส่ง `Content-Type: application/json` (trigger preflight) — ต้องใช้ `text/plain` → [external-frontend.md](rules/external-frontend.md) Rule #1
-- 🐛 **"ขออภัย ไม่สามารถเปิดไฟล์ได้ในเวลานี้"** เวลามี Google หลายบัญชีในเครื่อง — แก้ด้วย `?authuser=` หรือ `/u/<n>/` → [external-frontend.md](rules/external-frontend.md) Rule #8.1
-- 🐛 **Report รายวันส่งซ้ำ 3 ฉบับ** เพราะรัน setup หลายรอบ → trigger ซ้อน 3 ตัว → [triggers.md](rules/triggers.md) Rule #1
-- 🐛 **`clasp push` แล้วเว็บ `/exec` ยังเป็นโค้ดเก่า** เพราะ deployment ตรึง version — ต้อง `clasp deploy -i` → [deployment-versioning.md](rules/deployment-versioning.md) Rule #1-#2
-- 🐛 **งาน batch ตายกลางคันที่ 6 นาที ข้อมูลค้างครึ่งเดียว** เพราะไม่มี checkpoint + continuation trigger → [long-running-jobs.md](rules/long-running-jobs.md) Rule #2
+- 🐛 **"Service error: Spreadsheet"** during `range.setValues()` on a template that has merged cells → [spreadsheet-ops.md](rules/spreadsheet-ops.md)
+- 🐛 **PassPercent = 500%** because the client computed it wrong and the server trusted it verbatim → [spreadsheet-ops.md](rules/spreadsheet-ops.md) Rule #8
+- 🐛 **Signature preview renders as a broken image** because a Drive URL was used directly instead of being converted to base64 → [drive-ops.md](rules/drive-ops.md) Rule #3
+- 🐛 **Signature overlaps other rows in the PDF** because the image still had whitespace and no anchor offset was set → [pdf-generation.md](rules/pdf-generation.md) Rule #4, #6
+- 🐛 **Year dropdown expires in 2026** because 2024-2026 was hardcoded → [dynamic-dropdowns.md](rules/dynamic-dropdowns.md)
+- 🐛 **Lock stuck for 6 minutes** because `finally { releaseLock() }` was forgotten → [lock-service.md](rules/lock-service.md) Rule #4
+- 🐛 **Two people generate a PDF at once → temp sheet name collision** → [lock-service.md](rules/lock-service.md)
+- 🐛 **"Permission denied: DriveApp"** on a school/agency Google Workspace account because `setSharing(ANYONE_WITH_LINK)` is blocked by domain policy → [drive-ops.md](rules/drive-ops.md) Rule #4.1
+- 🐛 **Web app is not responsive on mobile** because the AI put the viewport meta tag in the `.gs` file instead of the `.html` → [htmlservice-frontend.md](rules/htmlservice-frontend.md) Rule #1
+- 🐛 **Phone number `0812345678` becomes `812345678`** because Sheets auto-parses it as a number — requires `setNumberFormat('@')` or a `'` prefix → [spreadsheet-ops.md](rules/spreadsheet-ops.md) Rule #6.6
+- 🐛 **A `Date` object sent from the server arrives at the client as `{}`** because `google.script.run` does not serialize Date → [spreadsheet-ops.md](rules/spreadsheet-ops.md) Rule #6.1
+- 🐛 **`getUserMedia` does not work in a web app** because the GAS iframe blocks it — the frontend has to move to GitHub Pages → [external-frontend.md](rules/external-frontend.md)
+- 🐛 **CORS error when fetching a GAS endpoint** because it sends `Content-Type: application/json` (which triggers a preflight) — must use `text/plain` → [external-frontend.md](rules/external-frontend.md) Rule #1
+- 🐛 **"Sorry, cannot open this file right now"** when the machine has multiple Google accounts — fix with `?authuser=` or `/u/<n>/` → [external-frontend.md](rules/external-frontend.md) Rule #8.1
+- 🐛 **Daily report sent 3 times** because setup was run several times → 3 stacked triggers → [triggers.md](rules/triggers.md) Rule #1
+- 🐛 **`clasp push` succeeded but `/exec` still serves the old code** because a deployment pins a version — requires `clasp deploy -i` → [deployment-versioning.md](rules/deployment-versioning.md) Rule #1-#2
+- 🐛 **A batch job died at the 6-minute mark with half the data written** because there was no checkpoint + continuation trigger → [long-running-jobs.md](rules/long-running-jobs.md) Rule #2
+- 🐛 **An optimistic lock let a stale tab wipe 179 bookings** over three weeks because the `rev` gate was bypassable → [data-integrity.md](rules/data-integrity.md)
 
-## โครงสร้าง repo
+## Repository structure
 
 ```
 gas-best-practices/
-├── SKILL.md             # entry point ที่ Claude อ่าน (มี frontmatter)
-├── AGENTS.md            # entry point สำหรับ AI tool อื่น
-├── README.md            # หน้าแรก GitHub
-├── CHANGELOG.md         # ประวัติ version
+├── SKILL.md             # entry point read by skills agents (has frontmatter)
+├── AGENTS.md            # entry point for non-skills AI tools
+├── README.md            # GitHub front page
+├── CHANGELOG.md         # version history
+├── CONTRIBUTING.md      # how to add a rule
 ├── LICENSE              # MIT
-├── install.sh           # one-liner setup
+├── install.sh           # one-liner setup for Claude Code
 ├── install.ps1
-├── build.sh             # generate PROMPT.md + sync .clinerules/.windsurfrules
-├── rules/               # กฎแยกตามหัวข้อ — แต่ละไฟล์ standalone (23 ไฟล์)
+├── build.sh             # generates PROMPT.md + syncs .clinerules/.windsurfrules
+├── rules/               # rules split by topic — every file is standalone (23 files)
 │   ├── project-structure.md
 │   ├── spreadsheet-ops.md
 │   └── ...
-├── evals/               # test prompts สำหรับวัดผล skill
+├── evals/               # test prompts for measuring the skill
 │   └── evals.json
-└── examples/            # โค้ดตัวอย่างที่ใช้ rule จริง
-    └── web-app-skeleton/   # login + RPC + Lock ครบใน 5 ไฟล์
+└── examples/            # example code that actually uses the rules
+    └── web-app-skeleton/   # login + RPC + Lock in 5 files
 ```
 
 ## Contributing
 
-PR ยินดีรับ! หลังแก้ `rules/*.md` หรือ `.cursorrules` ให้รัน `./build.sh` เพื่อ regenerate `PROMPT.md` / `.clinerules` / `.windsurfrules` ก่อน commit (CI จะเช็คว่า sync กัน) — แต่ละ rule ทำตามแม่แบบ:
+PRs welcome! After editing `rules/*.md` or `.cursorrules`, run `./build.sh` to
+regenerate `PROMPT.md` / `.clinerules` / `.windsurfrules` before committing
+(CI checks that they are in sync). This repository is English-only — see
+[CONTRIBUTING.md](CONTRIBUTING.md). Each rule follows this template:
 
 ```markdown
-# <หมวด>
+# <Topic>
 
-## Rule #N: <กฎสั้น ๆ ประโยคเดียว>
+## Rule #N: <one short sentence stating the rule>
 
-**Why:** <เหตุผล — bug จริงที่เคยเจอยิ่งดี>
+**Why:** <reason — a real bug you have actually hit>
 
 ### ✗ Bad
 \`\`\`javascript
-// โค้ดที่ทำให้พัง
+// code that breaks
 \`\`\`
 
 ### ✓ Good
 \`\`\`javascript
-// แม่แบบที่ถูก
+// the pattern that actually works
 \`\`\`
 
-**Edge case:** <ข้อยกเว้น ถ้ามี>
+**Edge case:** <exception, if any>
 ```
 
 ## License

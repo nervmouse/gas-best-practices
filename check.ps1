@@ -8,7 +8,7 @@ Write-Host "========================="
 
 if (-not (Test-Path $Dest)) {
   Write-Host "✗ Not installed" -ForegroundColor Red
-  Write-Host "  Install: iwr -useb https://raw.githubusercontent.com/kpcrmv4/gas-best-practices/main/install.ps1 | iex"
+  Write-Host "  Install: iwr -useb https://raw.githubusercontent.com/nervmouse/gas-best-practices/main/install.ps1 | iex"
   exit 1
 }
 

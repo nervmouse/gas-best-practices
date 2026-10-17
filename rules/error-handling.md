@@ -1,8 +1,8 @@
 # Error Handling
 
-## Rule #1: Result envelope ทุก server function — ไม่ throw
+## Rule #1: Result envelope for every server function — never throw
 
-ดู `rules/web-app-rpc.md` Rule #1 — สรุปอีกที:
+See `rules/web-app-rpc.md` Rule #1 — in short:
 
 ```javascript
 function anyServerFunction(...args) {
@@ -18,7 +18,7 @@ function anyServerFunction(...args) {
 
 ---
 
-## Rule #2: user-facing message ภาษาไทย — developer log ภาษาอังกฤษ
+## Rule #2: user-facing message in the user's language — developer log in English
 
 ```javascript
 function checkIn(callerUserId, visitId, lat, lng) {
@@ -26,12 +26,12 @@ function checkIn(callerUserId, visitId, lat, lng) {
     const visit = readVisit_(visitId);
     if (!visit) {
       Logger.log('[checkIn] visit not found: ' + visitId);
-      throw new Error('ไม่พบนัดหมาย กรุณารีเฟรชหน้าจอ');
+      throw new Error('Appointment not found, please refresh the screen');
     }
     const distance = haversine_(lat, lng, visit.HouseLat, visit.HouseLng);
     if (distance > 1000) {
       Logger.log('[checkIn] too far: ' + distance + 'm');
-      throw new Error('คุณอยู่ห่างจากบ้านผู้ป่วยเกิน 1 กม. (วัดได้ ' + Math.round(distance) + ' ม.)');
+      throw new Error('You are more than 1 km from the patient house (measured ' + Math.round(distance) + ' m)');
     }
     // ...
   } catch (err) {
@@ -40,48 +40,48 @@ function checkIn(callerUserId, visitId, lat, lng) {
 }
 ```
 
-**Pattern:** Logger.log สำหรับ context (technical) — `err.message` สำหรับ user (actionable Thai)
+**Pattern:** Logger.log for context (technical) — `err.message` for the user (actionable, in their language)
 
 ---
 
-## Rule #3: catch + rethrow — เพิ่ม context
+## Rule #3: catch + rethrow — add context
 
 ```javascript
 try {
   generatePdfForRecord(...);
 } catch (err) {
-  throw new Error('สร้าง PDF ของ record ' + recordId + ' ล้มเหลว: ' + err.message);
+  throw new Error('Failed to build the PDF for record ' + recordId + ': ' + err.message);
 }
 ```
 
 ---
 
-## Rule #4: ห้าม swallow error เงียบ ๆ
+## Rule #4: never swallow an error silently
 
 ```javascript
-// ✗ Bad — error หาย ไม่รู้ว่าพังตรงไหน
+// ✗ Bad — the error disappears, no idea where it broke
 try {
   doStuff();
 } catch (e) {}
 
-// ✓ Good — log อย่างน้อยที่สุด
+// ✓ Good — log it at minimum
 try {
   doStuff();
 } catch (e) {
   Logger.log('[doStuff] silenced: ' + (e.stack || e));
 }
 
-// ✓ Good — ระบุชัดว่าทำไม OK ที่ผ่าน
+// ✓ Good — state clearly why swallowing it is OK
 try {
   DriveApp.getFileById(oldId).setTrashed(true);
 } catch (e) {
-  // ไฟล์ถูกลบไปแล้ว — OK ไม่ใช่ error
+  // the file is already trashed — OK, not an error
 }
 ```
 
 ---
 
-## Rule #5: error message ที่ user actionable — ไม่ใช่ "Error"
+## Rule #5: user-actionable error messages — not "Error"
 
 ### ✗ Bad
 
@@ -94,38 +94,38 @@ throw new Error('Failed');
 ### ✓ Good
 
 ```javascript
-throw new Error('กรุณากรอกชื่อวิชา');
-throw new Error('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
-throw new Error('คุณไม่มีสิทธิ์ลบ record ของคนอื่น');
+throw new Error('Please enter a subject name');
+throw new Error('Password must be at least 8 characters');
+throw new Error('You do not have permission to delete records belonging to others');
 ```
 
-แต่ละ message ตอบ 2 คำถาม:
-1. **อะไรพัง?** (ผู้ใช้ทำอะไรผิด หรือระบบเจออะไร)
-2. **ทำอะไรต่อ?** (กรอกใหม่, ติดต่อ admin, รอลองใหม่)
+Every message answers 2 questions:
+1. **What went wrong?** (what the user did wrong, or what the system hit)
+2. **What to do next?** (re-enter it, contact the admin, wait and retry)
 
 ---
 
-## Rule #6: GAS error messages ที่ต้องแปล (พบบ่อย)
+## Rule #6: common GAS error messages that need translating
 
-| GAS native | แปลให้ user |
+| GAS native | Translate for the user |
 |---|---|
-| `ข้อผิดพลาดของบริการ: สเปรดชีต` | "ระบบ Sheet ขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง" + log จริง |
-| `Service Spreadsheets failed while accessing document` | "เปิดเอกสารไม่ได้ — ตรวจสอบสิทธิ์" |
-| `Exception: Address unavailable` | "เชื่อมต่อ API ภายนอกไม่ได้ กรุณาลองใหม่" |
-| `Lock wait timeout` | "ระบบกำลังประมวลผลคำขออื่น กรุณาลองใหม่ในอีกสักครู่" |
-| `Exceeded maximum execution time` | "ประมวลผลใช้เวลานานเกินกำหนด — กรุณาแบ่งงานเป็นชุดเล็ก" |
+| `Service error: Spreadsheet` | "The Sheet service is temporarily unavailable, please try again" + log the real error |
+| `Service Spreadsheets failed while accessing document` | "Could not open the document — check permissions" |
+| `Exception: Address unavailable` | "Could not reach the external API, please try again" |
+| `Lock wait timeout` | "The system is handling other requests, please retry in a moment" |
+| `Exceeded maximum execution time` | "Processing took too long — split the work into smaller batches" |
 
 ```javascript
 function translateError_(err) {
   const msg = String(err.message || err);
-  if (msg.includes('ข้อผิดพลาดของบริการ')) {
-    return 'ระบบ Sheet ขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง';
+  if (msg.includes('Service error')) {
+    return 'The Sheet service is temporarily unavailable, please try again';
   }
   if (msg.includes('Lock')) {
-    return 'ระบบกำลังประมวลผลคำขออื่น กรุณาลองใหม่ในอีกสักครู่';
+    return 'The system is handling other requests, please retry in a moment';
   }
   if (msg.includes('execution time')) {
-    return 'ประมวลผลใช้เวลานานเกินกำหนด กรุณาลองใหม่';
+    return 'Processing took too long, please try again';
   }
   return msg;
 }
@@ -133,24 +133,24 @@ function translateError_(err) {
 
 ---
 
-## Rule #7: client แสดง error เป็น modal ไม่ใช่ console
+## Rule #7: show errors in a modal on the client, not in the console
 
 ```javascript
 // ✗ Bad
 console.error(res.message);
 
 // ✓ Good
-Swal.fire('ผิดพลาด', res.message, 'error');
+Swal.fire('Error', res.message, 'error');
 ```
 
-ระดับความรุนแรง:
-- `error` (สีแดง) — ทำต่อไม่ได้ ต้องแก้
-- `warning` (สีเหลือง) — มีปัญหา แต่ทำงานต่อได้
-- `info` (สีฟ้า) — แค่แจ้งข่าว
+Severity levels:
+- `error` (red) — cannot continue, must be fixed
+- `warning` (yellow) — something is wrong but the work can continue
+- `info` (blue) — just a notice
 
 ---
 
-## Rule #8: retry pattern สำหรับ transient error
+## Rule #8: retry pattern for transient errors
 
 ```javascript
 async function rpcWithRetry(name, ...args) {
@@ -160,18 +160,18 @@ async function rpcWithRetry(name, ...args) {
     try {
       const res = await rpc(name, ...args);
       if (res.ok) return res;
-      // ถ้า error เป็น lock/transient — retry
+      // if the error is lock/transient — retry
       if (/lock|busy|timeout|service/i.test(res.message)) {
         await sleep(1000 * (i + 1));
         continue;
       }
-      return res; // permanent error — ไม่ retry
+      return res; // permanent error — do not retry
     } catch (e) {
       lastErr = e;
       await sleep(1000 * (i + 1));
     }
   }
-  return { ok: false, message: 'เชื่อมต่อระบบไม่สำเร็จ กรุณาลองใหม่ภายหลัง' };
+  return { ok: false, message: 'Could not reach the system, please try again later' };
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

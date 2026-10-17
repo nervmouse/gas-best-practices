@@ -1,10 +1,10 @@
 # Web App RPC Pattern
 
-GAS web app เรียก server function จาก client ผ่าน `google.script.run` — ต่อไปนี้คือ pattern ที่ scale ได้
+A GAS web app calls server functions from the client via `google.script.run` — these are the patterns that scale
 
-## Rule #1: ทุก server function คืน `Result<T>` envelope ห้าม throw
+## Rule #1: every server function returns a `Result<T>` envelope — never throw
 
-**Why:** ถ้า throw ใน server, client ได้แค่ `error.message` แบบ raw — ถ้า error เกิดในชั้นลึก message อาจเป็น "Exception: ข้อผิดพลาดของบริการ: สเปรดชีต" (user งง)
+**Why:** if the server throws, the client only gets a raw `error.message` — and if the error happens deep in the stack, the message may be "Exception: Service error: Spreadsheet" (the user has no idea what that means)
 
 ### ✓ Good — envelope pattern
 
@@ -14,7 +14,7 @@ function saveRecord(callerUserId, payload) {
     const caller = requireUser_(callerUserId);
     requireRole_(caller, ['teacher']);
     // ... mutation ...
-    return { ok: true, recordId: recordId, message: 'บันทึกสำเร็จ' };
+    return { ok: true, recordId: recordId, message: 'Saved successfully' };
   } catch (err) {
     Logger.log('[saveRecord] ' + (err.stack || err));
     return { ok: false, message: err.message || String(err) };
@@ -39,52 +39,52 @@ function rpc(name, ...args) {
 // Usage
 const res = await rpc('saveRecord', this.user.userId, payload);
 if (res.ok) {
-  Swal.fire('สำเร็จ', res.message, 'success');
+  Swal.fire('Success', res.message, 'success');
 } else {
-  Swal.fire('ผิดพลาด', res.message, 'error');
+  Swal.fire('Error', res.message, 'error');
 }
 ```
 
 ---
 
-## Rule #3: identify caller ผ่าน `callerUserId` parameter ไม่ใช่ Session.getActiveUser()
+## Rule #3: identify the caller through a `callerUserId` parameter, not `Session.getActiveUser()`
 
-**Why:** ถ้า web app `executeAs: USER_DEPLOYING` ทุก request `Session.getActiveUser()` = owner ของ deployment — ไม่ใช่ user ที่กดปุ่ม
+**Why:** with a web app deployed as `executeAs: USER_DEPLOYING`, `Session.getActiveUser()` equals the deployment owner on every request — not the user who clicked the button
 
 ### ✓ Good — token-based caller
 
 ```javascript
-// Client เก็บ userId หลัง login (ใน localStorage ก็ได้ ถ้า low-stakes)
+// Client stores userId after login (localStorage is fine when stakes are low)
 const res = await rpc('saveRecord', this.user.userId, payload);
 
-// Server: validate callerUserId ทุก function
+// Server: validate callerUserId in every function
 function requireUser_(callerUserId) {
-  if (!callerUserId) throw new Error('ไม่ได้ login');
+  if (!callerUserId) throw new Error('Not logged in');
   const user = findUserById_(callerUserId);
-  if (!user) throw new Error('ไม่พบผู้ใช้');
-  if (user.Active === false || user.Active === 'false') throw new Error('บัญชีถูกปิด');
+  if (!user) throw new Error('User not found');
+  if (user.Active === false || user.Active === 'false') throw new Error('Account is disabled');
   return user;
 }
 
 function requireRole_(user, allowedRoles) {
-  if (!allowedRoles.includes(user.Role)) throw new Error('ไม่มีสิทธิ์');
+  if (!allowedRoles.includes(user.Role)) throw new Error('Permission denied');
 }
 ```
 
-**ข้อจำกัด:** `callerUserId` พอใส่ใน client ก็ปลอม userId ของคนอื่นได้ — สำหรับงานที่ต้องการ security จริง ๆ ต้องเก็บ session token + verify (ดู `rules/security.md`)
+**Limitation:** `callerUserId` is set on the client, so anyone can forge another user's ID — for work that needs real security you must store a session token + verify it (see `rules/security.md`)
 
 ---
 
-## Rule #4: ป้องกัน HTML payload ใหญ่เกินไป — RPC limit 50MB
+## Rule #4: guard against oversized HTML payloads — RPC limit is 50MB
 
-ถ้าต้อง upload รูป/ไฟล์ใหญ่:
-- รูป → base64 dataURL ขนาด ≤ 5MB ปกติพอ
-- ไฟล์ใหญ่ → ให้ upload เข้า Drive ก่อน แล้วส่งแค่ `fileId` มา server
+If you need to upload images/large files:
+- images → base64 dataURL up to 5MB is normally enough
+- large files → upload to Drive first, then send only the `fileId` to the server
 
 ### ✓ Good
 
 ```javascript
-// Client: บีบรูปก่อนส่ง
+// Client: compress the image before sending
 function compressImage(dataUrl, maxWidth = 1200) {
   return new Promise(resolve => {
     const img = new Image();
@@ -103,9 +103,9 @@ function compressImage(dataUrl, maxWidth = 1200) {
 
 ---
 
-## Rule #5: bundle initial load — เรียก 1 ฟังก์ชันได้หลายอย่าง
+## Rule #5: bundle the initial load — one function call, many payloads
 
-**Why:** ทุก RPC = round-trip ~300ms — 5 calls ตอน boot = 1.5s
+**Why:** every RPC = a ~300ms round-trip — 5 calls at boot = 1.5s
 
 ### ✗ Bad
 
@@ -141,17 +141,17 @@ const bundle = await rpc('loadInitialBundle', this.user.userId);
 
 ---
 
-## Rule #6: optimistic update — อย่ารอ server เพื่อแสดงผล
+## Rule #6: optimistic update — do not wait for the server just to render
 
 ```javascript
 async doSaveReview() {
   const optimisticStatus = this.modal.reviewStatus;
-  this.modal.record.AcademicStatus = optimisticStatus; // อัพเดท UI ทันที
+  this.modal.record.AcademicStatus = optimisticStatus; // update the UI immediately
   try {
     const res = await rpc('updateRecordStatus', uid, rowIndex, optimisticStatus, comment);
     if (!res.ok) {
       // rollback
-      Swal.fire('ผิดพลาด', res.message, 'error');
+      Swal.fire('Error', res.message, 'error');
       this.refresh(false);
     }
   } catch (e) {
@@ -162,15 +162,15 @@ async doSaveReview() {
 
 ---
 
-## Rule #7: loading overlay สำหรับ operation > 1 วินาที
+## Rule #7: loading overlay for operations > 1 second
 
-ใช้ SweetAlert2 หรือ overlay element:
+Use SweetAlert2 or an overlay element:
 
 ```javascript
 async doGeneratePdf() {
   Swal.fire({
-    title: 'กำลังสร้าง PDF...',
-    html: 'กรุณารอสักครู่',
+    title: 'Generating PDF...',
+    html: 'Please wait a moment',
     allowOutsideClick: false,
     didOpen: () => Swal.showLoading(),
   });
@@ -180,10 +180,10 @@ async doGeneratePdf() {
       Swal.close();
       window.open(res.pdfUrl, '_blank');
     } else {
-      Swal.fire('ผิดพลาด', res.message, 'error');
+      Swal.fire('Error', res.message, 'error');
     }
   } catch (e) {
-    Swal.fire('Error', 'สร้าง PDF ไม่สำเร็จ', 'error');
+    Swal.fire('Error', 'Failed to generate PDF', 'error');
   }
 }
 ```

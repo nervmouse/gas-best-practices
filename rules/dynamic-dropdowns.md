@@ -1,8 +1,8 @@
-# Dynamic Dropdowns (ค่าตัวเลือกที่ไม่ควรฟิกตายตัว)
+# Dynamic Dropdowns (options that should never be hardcoded)
 
-## Rule: dropdown ที่เกี่ยวกับวันที่/ปี — ห้าม hardcode ใน HTML
+## Rule: date/year dropdowns — never hardcode them in HTML
 
-**Why:** โค้ดที่ hardcode `<option value="2024">2024</option>` จะ "ล้าสมัย" ทันทีที่เวลาผ่านไป — user ปี 2027 เปิดมาเห็นปีเก่า งงทันที
+**Why:** code that hardcodes `<option value="2024">2024</option>` goes "stale" the moment time passes — a user in 2027 opens the page, sees the old years, and is confused immediately
 
 ### ✗ Bad — fixed list
 
@@ -14,20 +14,20 @@
 </select>
 ```
 
-### ✓ Good — generate จากปีปัจจุบัน + กรองค่าที่มีใน sheet
+### ✓ Good — generate from the current year + merge in the values present in the sheet
 
 ```javascript
-// ใน Alpine data() / state
+// inside Alpine data() / state
 get yearOptions() {
-  // ปีปัจจุบัน + 2 ปีก่อนหน้า + 2 ปีถัดไป (พ.ศ.)
+  // current year + 2 previous + 2 next (Buddhist Era)
   const currentBE = new Date().getFullYear() + 543;
   const generated = [];
   for (let y = currentBE - 2; y <= currentBE + 2; y++) generated.push(y);
 
-  // รวมกับปีที่เคยมีใน records (กรณีมี record เก่ากว่า -2 ปี)
+  // merge in years that already appear in records (in case a record is older than -2 years)
   const fromData = [...new Set(this.records.map(r => Number(r.Year)).filter(Boolean))];
 
-  // merge + sort desc (ปีใหม่ก่อน) + unique
+  // merge + sort desc (newest first) + unique
   return [...new Set([...generated, ...fromData])].sort((a, b) => b - a);
 }
 ```
@@ -42,41 +42,41 @@ get yearOptions() {
 
 ---
 
-## Rule: default value = ปีปัจจุบัน
+## Rule: default value = the current year
 
 ```javascript
-// ตอน init form
+// when initialising the form
 recordForm: {
-  year: new Date().getFullYear() + 543, // พ.ศ.
+  year: new Date().getFullYear() + 543, // Buddhist Era
   term: this.guessCurrentTerm(),
   // ...
 },
 
 guessCurrentTerm() {
   const m = new Date().getMonth() + 1; // 1-12
-  // ภาคเรียนที่ 1: พ.ค.-ก.ย. (5-9), ภาคเรียนที่ 2: ต.ค.-มี.ค.
+  // term 1: May-Sep (5-9), term 2: Oct-Mar
   return (m >= 5 && m <= 9) ? 1 : 2;
 }
 ```
 
 ---
 
-## Rule: dropdown ที่เป็น enum จาก data จริง — pull จาก sheet
+## Rule: enum dropdowns built from real data — pull them from the sheet
 
-ตัวอย่าง: dropdown "ชั้น" (ป.1, ป.2, ม.3, ฯลฯ) — ดึงจาก records ที่มีอยู่จริง + เพิ่ม "ค่าที่ยังไม่มี" เป็น input field
+Example: a "class level" dropdown (P.1, P.2, M.3, ...) — pull from the records that actually exist + add an input field for "a value not yet present"
 
 ```javascript
 get classLevelOptions() {
   const fromData = [...new Set(this.records.map(r => r.ClassLevel).filter(Boolean))];
-  const defaults = ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3'];
+  const defaults = ['P.1', 'P.2', 'P.3', 'P.4', 'P.5', 'P.6', 'M.1', 'M.2', 'M.3'];
   return [...new Set([...defaults, ...fromData])].sort();
 }
 ```
 
-หรือถ้าต้องการ flexible สุด — ใช้ `<input list="...">` (datalist) แทน select:
+Or if you want maximum flexibility — use `<input list="...">` (datalist) instead of a select:
 
 ```html
-<input list="classLevels" x-model="recordForm.classLevel" placeholder="เช่น ป.1">
+<input list="classLevels" x-model="recordForm.classLevel" placeholder="e.g. P.1">
 <datalist id="classLevels">
   <template x-for="c in classLevelOptions" :key="c">
     <option :value="c"></option>
@@ -84,11 +84,11 @@ get classLevelOptions() {
 </datalist>
 ```
 
-User พิมพ์ค่าใหม่ก็ได้ + เห็น autocomplete ของค่าที่เคยมี
+The user can type a brand new value and still gets autocomplete for values that already exist
 
 ---
 
-## Rule: เดือน — ใช้ Intl.DateTimeFormat ไม่ hardcode
+## Rule: months — use Intl.DateTimeFormat, do not hardcode
 
 ```javascript
 get monthOptions() {
@@ -97,7 +97,7 @@ get monthOptions() {
     const d = new Date(2000, m, 1);
     months.push({
       value: m + 1,
-      label: d.toLocaleString('th-TH', { month: 'long' }) // 'มกราคม', 'กุมภาพันธ์'
+      label: d.toLocaleString('th-TH', { month: 'long' }) // long month name, localised
     });
   }
   return months;
@@ -106,7 +106,7 @@ get monthOptions() {
 
 ---
 
-## Rule: time slot — generate ตาม step
+## Rule: time slots — generate them by step
 
 ```javascript
 get timeSlots() {
@@ -124,7 +124,7 @@ get timeSlots() {
 
 ---
 
-## Rule: dropdown ที่ขึ้นกับ user role — กรองฝั่ง client + double-check server
+## Rule: dropdowns that depend on the user role — filter on the client + double-check on the server
 
 ```javascript
 get folderOptions() {
@@ -133,20 +133,20 @@ get folderOptions() {
 }
 ```
 
-**Server ก็ต้อง enforce — อย่าเชื่อ client filter** (ดู `rules/security.md`)
+**The server must enforce it too — never trust the client filter** (see `rules/security.md`)
 
 ---
 
-## Rule: refresh option list หลัง create row ใหม่
+## Rule: refresh the option list after creating a new row
 
 ```javascript
 async doCreateRecord() {
   const res = await rpc('saveRecord', this.user.userId, this.recordForm);
   if (res.ok) {
     this.records.push(res.record);
-    // computed property yearOptions/classLevelOptions จะ recompute เอง — ไม่ต้องสั่ง
+    // the computed properties yearOptions/classLevelOptions recompute on their own — nothing to trigger
   }
 }
 ```
 
-ใช้ Vue/Alpine computed → reactive อัตโนมัติ
+Use Vue/Alpine computed → reactivity is automatic

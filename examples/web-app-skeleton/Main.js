@@ -4,7 +4,7 @@
  */
 
 const APP_VERSION = 'v1-example';
-const SPREADSHEET_ID = ''; // ใส่ ID ของ spreadsheet — หรือปล่อยว่างถ้า bind กับ sheet
+const SPREADSHEET_ID = ''; // put your spreadsheet ID here — or leave empty if the script is bound to a sheet
 
 function getSs_() {
   return SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID) : SpreadsheetApp.getActive();
@@ -14,16 +14,16 @@ function getSs_() {
 function doGet() {
   ensureSchema();
   return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('ตัวอย่างระบบบันทึกข้อมูล')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1'); // viewport ใส่ที่ .gs ผ่าน addMetaTag หรือใน .html — ดู rules/htmlservice-frontend.md
+    .setTitle('Example Record App')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1'); // viewport goes in the .gs via addMetaTag or in the .html — see rules/htmlservice-frontend.md
 }
 
-// ── Schema (idempotent — รันซ้ำได้ไม่พัง) ──────────────────────
+// ── Schema (idempotent — safe to run repeatedly) ──────────────
 function ensureSchema() {
   ensureSheet_('Users', ['UserID', 'Username', 'DisplayName', 'Role', 'PasswordHash', 'PasswordSalt', 'Active']);
   ensureSheet_('Sessions', ['Token', 'UserID', 'ExpiresAt', 'CreatedAt']);
   const records = ensureSheet_('Records', ['RecordID', 'Title', 'Phone', 'OwnerUserID', 'CreatedAt']);
-  ensureTextColumn_(records, 'Phone'); // กันเลข 0 นำหน้าหาย — rules/spreadsheet-ops.md Rule #6.6
+  ensureTextColumn_(records, 'Phone'); // stop leading zeros from being stripped — rules/spreadsheet-ops.md Rule #6.6
   ensureSheet_('Config', ['Key', 'Value']);
 }
 
@@ -50,7 +50,7 @@ function ensureTextColumn_(sheet, headerName) {
 // ── Sheet helpers (rules/spreadsheet-ops.md) ──────────────────
 function readSheet_(sheet) {
   if (!sheet) return [];
-  const data = sheet.getDataRange().getValues(); // อ่านครั้งเดียว — Rule #1
+  const data = sheet.getDataRange().getValues(); // read once — Rule #1
   if (data.length <= 1) return [];
   const headers = data[0];
   return data.slice(1).map((row, i) => {
@@ -63,13 +63,13 @@ function readSheet_(sheet) {
 
 function appendRowByHeaders_(sheet, obj) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  sheet.appendRow(headers.map(h => (obj[h] != null ? obj[h] : ''))); // ตาม header ไม่ hardcode index — Rule #3
+  sheet.appendRow(headers.map(h => (obj[h] != null ? obj[h] : ''))); // map by header, never hardcode the index — Rule #3
 }
 
 function colIndex_(sheet, headerName) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const idx = headers.indexOf(headerName);
-  if (idx < 0) throw new Error('ไม่พบ column: ' + headerName);
+  if (idx < 0) throw new Error('Column not found: ' + headerName);
   return idx + 1;
 }
 
@@ -78,7 +78,7 @@ function getConfig_(key) {
   return row ? String(row.Value) : '';
 }
 
-// Date → ISO string ก่อนส่ง client — google.script.run ไม่ serialize Date (Rule #6.1)
+// Date → ISO string before sending to the client — google.script.run cannot serialize Date (Rule #6.1)
 function sanitizeForClient_(obj) {
   const out = {};
   for (const k in obj) {

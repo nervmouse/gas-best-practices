@@ -1,18 +1,18 @@
 # web-app-skeleton
 
-Single-page web app ขนาดเล็กที่ใช้ pattern หลักของ skill ครบ: login (hash + session token), RPC ผ่าน `google.script.run` แบบ Result envelope, LockService, leading-zero protection, Date serialization
+A small single-page web app that covers the skill's core patterns: login (hash + session token), RPC through `google.script.run` with a Result envelope, LockService, leading-zero protection, Date serialization
 
-## ไฟล์
+## Files
 
-| ไฟล์ | ใช้ pattern จาก |
+| File | Patterns used |
 |---|---|
-| `appsscript.json` | `rules/project-structure.md` — V8, timezone, scope แคบ (แค่ `spreadsheets` เพราะไม่ได้ใช้ Drive) |
-| `Main.js` | schema idempotent, `readSheet_`, `appendRowByHeaders_`, `sanitizeForClient_` |
+| `appsscript.json` | `rules/project-structure.md` — V8, timezone, narrow scope (`spreadsheets` only because Drive is not used) |
+| `Main.js` | idempotent schema, `readSheet_`, `appendRowByHeaders_`, `sanitizeForClient_` |
 | `Users.js` | `rules/security.md` — hash+salt, session token, `requireSession_`/`requireRole_` |
-| `Records.js` | `rules/web-app-rpc.md`, `rules/lock-service.md` — Result envelope, validate boundary, Lock+finally |
+| `Records.js` | `rules/web-app-rpc.md`, `rules/lock-service.md` — Result envelope, validation at the boundary, Lock+finally |
 | `Index.html` | `rules/htmlservice-frontend.md`, `rules/logging-boundaries.md` — viewport, rpc wrapper, log boundary |
 
-## วิธีใช้
+## Usage
 
 ```bash
 mkdir my-app && cd my-app
@@ -21,11 +21,11 @@ cp <skill-path>/examples/web-app-skeleton/* .
 clasp push
 ```
 
-1. เปิด Apps Script editor → รัน `_setup_createAdmin` หนึ่งครั้ง (สร้าง user `admin` / `changeme`)
+1. Open the Apps Script editor → run `_setup_createAdmin` once (creates user `admin` / `changeme`)
 2. Deploy → New deployment → Web app
-3. เปิด URL → login → บันทึกรายการ
-4. **เปลี่ยนรหัส admin ทันที** และลบ `_setup_createAdmin` ออกก่อนใช้จริง
+3. Open the URL → log in → save a record
+4. **Change the admin password immediately** and delete `_setup_createAdmin` before going live
 
-## หมายเหตุ
+## Notes
 
-- ตัวอย่างย่อเพื่อให้อ่านจบใน 5 นาที — ระบบจริงควรเพิ่ม: ล้าง session หมดอายุด้วย trigger, cache user lookup (`rules/cache-service.md`), audit log (`rules/security.md` Rule #8)
+- The example is trimmed so it can be read in 5 minutes — a real system should add: purging expired sessions with a trigger, caching user lookups (`rules/cache-service.md`), an audit log (`rules/security.md` Rule #8)

@@ -1,10 +1,10 @@
 # HtmlService & Frontend
 
-## Rule #1: `<meta viewport>` ต้องอยู่ใน `<head>` ของไฟล์ `.html` — ห้ามใส่ใน `.gs`
+## Rule #1: `<meta viewport>` must live in the `<head>` of a `.html` file — never in a `.gs`
 
-**Bug ที่ AI ชอบทำ:** บาง AI ที่ generate GAS web app ใส่ viewport meta tag เป็น string ในไฟล์ `.gs`:
+**Bug AI assistants love to make:** some AIs that generate a GAS web app put the viewport meta tag in as a string inside a `.gs` file:
 
-### ✗ Bad — ใส่ใน .gs ไม่ทำงาน
+### ✗ Bad — inside .gs, does not work
 
 ```javascript
 // Code.gs
@@ -15,7 +15,7 @@ function doGet() {
 }
 ```
 
-หรือพยายาม inject ผ่าน function:
+Or they try to inject it through a function:
 
 ```javascript
 function getViewport() {
@@ -23,14 +23,14 @@ function getViewport() {
 }
 ```
 
-**ทำไมไม่ทำงาน:**
-- `HtmlService` wrap HTML ของเราใน iframe (`googleusercontent.com/...`) — meta tag ที่อยู่ใน `<body>` หรือ inject runtime จะไม่ effective เพราะ browser parse viewport ตอน initial HTML render เท่านั้น
-- string concat ใน `.gs` มัก escape ผิด ทำให้ tag เพี้ยน
-- iframe parent คือ Google Apps Script wrapper — เราไม่มีสิทธิ์แก้ viewport ของ parent
+**Why it does not work:**
+- `HtmlService` wraps your HTML in an iframe (`googleusercontent.com/...`) — a meta tag sitting in `<body>`, or injected at runtime, is ineffective because browsers only parse the viewport during the initial HTML render
+- string concat in `.gs` often escapes incorrectly and mangles the tag
+- the iframe parent is the Google Apps Script wrapper — we have no permission to change the parent's viewport
 
-ผลที่เห็น: เปิดเว็บแอปบนมือถือแล้วหน้าเล็กจิ๋ว ต้อง pinch-zoom ทุกครั้ง
+What you see: the web app opens on mobile at a tiny size and you have to pinch-zoom every time
 
-### ✓ Good — อยู่ใน `<head>` ของไฟล์ `.html`
+### ✓ Good — in the `<head>` of the `.html` file
 
 ```html
 <!-- Index.html -->
@@ -48,7 +48,7 @@ function getViewport() {
 ```
 
 ```javascript
-// รหัส.js / Code.gs
+// Code.gs
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('My GAS Web App')
@@ -56,28 +56,28 @@ function doGet() {
 }
 ```
 
-**ใช้ `addMetaTag()`** ของ `HtmlOutput` — Google จะ inject เข้า `<head>` ของ iframe wrapper ด้วย (defense in depth)
+**Use `HtmlOutput`'s `addMetaTag()`** — Google injects it into the `<head>` of the iframe wrapper too (defense in depth)
 
 ---
 
-## Rule #2: viewport ที่ครอบคลุมทุกกรณี
+## Rule #2: a viewport that covers every case
 
 ```html
-<!-- ทั่วไป -->
+<!-- general -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- ห้าม user zoom เพื่อกัน UI พังตอน focus input บน iOS -->
+<!-- block user zoom to stop the UI breaking on input focus in iOS -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-<!-- PWA-style: ครอบคลุม notch บน iPhone -->
+<!-- PWA-style: covers the notch on iPhone -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 ```
 
-**Caveat ของ `maximum-scale=1.0`:** บล็อก accessibility (user สายตาไม่ดี zoom ไม่ได้) — ใช้เฉพาะเมื่อจำเป็นจริง
+**Caveat of `maximum-scale=1.0`:** it blocks accessibility (visually impaired users cannot zoom) — use it only when genuinely necessary
 
 ---
 
-## Rule #3: ใช้ `HtmlService.createHtmlOutputFromFile()` ไม่ใช่ string concat
+## Rule #3: use `HtmlService.createHtmlOutputFromFile()`, not string concat
 
 ### ✗ Bad
 
@@ -97,11 +97,11 @@ function doGet() {
 }
 ```
 
-แยก HTML ออกเป็นไฟล์เดี่ยว → syntax highlighting, format, version control ใช้ได้
+Splitting the HTML into its own file gives you syntax highlighting, formatting and version control
 
 ---
 
-## Rule #4: `<?!= include('partial') ?>` — แยก partial เป็นไฟล์
+## Rule #4: `<?!= include('partial') ?>` — split partials into their own files
 
 ```javascript
 // Code.gs
@@ -139,56 +139,56 @@ function include(filename) {
 </script>
 ```
 
-**Caveat ในไฟล์ partial:** ห้ามมี `<!DOCTYPE>` หรือ `<html>` — แค่ snippet — เพราะมันจะถูก inline เข้าหน้าเต็ม
+**Caveat for partial files:** no `<!DOCTYPE>` and no `<html>` — snippets only — because they get inlined into the full page
 
 ---
 
-## Rule #5: `<?= var ?>` escape อัตโนมัติ — `<?!= var ?>` ห้าม escape
+## Rule #5: `<?= var ?>` escapes automatically — `<?!= var ?>` does not escape
 
-| Tag | Behavior | ใช้กับ |
+| Tag | Behavior | Use for |
 |---|---|---|
-| `<?= ... ?>` | HTML-escape อัตโนมัติ | user-supplied data (กัน XSS) |
-| `<?!= ... ?>` | raw output, ไม่ escape | partial include, trusted HTML |
-| `<? ... ?>` | execute, ไม่ output | loop, if-else |
+| `<?= ... ?>` | HTML-escapes automatically | user-supplied data (prevents XSS) |
+| `<?!= ... ?>` | raw output, no escaping | partial includes, trusted HTML |
+| `<? ... ?>` | executes, outputs nothing | loops, if-else |
 
 ```html
 <!-- Safe -->
 <div>Hello, <?= userName ?></div>
 
-<!-- Dangerous if userName มี HTML -->
+<!-- Dangerous if userName contains HTML -->
 <div>Hello, <?!= userName ?></div>
 ```
 
 ---
 
-## Rule #6: server function ที่ template เรียกตอน render — ต้อง deterministic + fast
+## Rule #6: server functions a template calls at render time — must be deterministic + fast
 
 ```javascript
 function doGet() {
   const t = HtmlService.createTemplateFromFile('Index');
   t.userName = Session.getActiveUser().getEmail();
-  t.items = readSheet_(sheet); // ระวัง — ถ้า sheet ใหญ่ render ช้า
+  t.items = readSheet_(sheet); // careful — a large sheet makes rendering slow
   return t.evaluate().setTitle('App');
 }
 ```
 
-**Trade-off:** server-render = SEO + first paint เร็ว แต่ผูกกับ session + ไม่ cache
-**Alternative:** ส่ง HTML shell ออกไปก่อน แล้ว fetch data ผ่าน `google.script.run` ใน client-side (SPA pattern)
+**Trade-off:** server-render = SEO + fast first paint, but it is tied to the session and cannot be cached
+**Alternative:** ship the HTML shell first, then fetch data via `google.script.run` client-side (SPA pattern)
 
 ---
 
-## Rule #7: `setXFrameOptionsMode(ALLOWALL)` ถ้าต้อง embed ในเว็บอื่น
+## Rule #7: `setXFrameOptionsMode(ALLOWALL)` when you must embed in another site
 
 ```javascript
 HtmlService.createHtmlOutputFromFile('Index')
   .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 ```
 
-default คือ `DEFAULT` — block embed → web app เปิดได้ผ่าน URL ตรงเท่านั้น ถ้าต้อง embed ใน Sites/iframe ต้อง ALLOWALL
+The default is `DEFAULT` — it blocks embedding → the web app opens only via its direct URL; if you must embed it in Sites/an iframe you need ALLOWALL
 
 ---
 
-## Rule #8: ห้ามใช้ inline event handler ที่เรียก server function ตรง ๆ
+## Rule #8: never use an inline event handler that calls a server function directly
 
 ### ✗ Bad
 
@@ -196,42 +196,42 @@ default คือ `DEFAULT` — block embed → web app เปิดได้ผ
 <button onclick="google.script.run.saveData('hello')">Save</button>
 ```
 
-### ✓ Good — wrap ผ่าน rpc + handle response
+### ✓ Good — wrap it in rpc + handle the response
 
 ```html
 <button onclick="doSave()">Save</button>
 <script>
   async function doSave() {
     const res = await rpc('saveData', 'hello');
-    if (res.ok) Swal.fire('สำเร็จ');
-    else Swal.fire('ผิดพลาด', res.message, 'error');
+    if (res.ok) Swal.fire('Success');
+    else Swal.fire('Error', res.message, 'error');
   }
 </script>
 ```
 
-ดู `rules/web-app-rpc.md` Rule #2 สำหรับ `rpc()` wrapper
+See `rules/web-app-rpc.md` Rule #2 for the `rpc()` wrapper
 
 ---
 
-## Rule #9: tags ที่มักลืม
+## Rule #9: tags people forget
 
 ```html
 <head>
-  <meta charset="UTF-8">                                  <!-- 1. ครั้งแรกเสมอ -->
+  <meta charset="UTF-8">                                  <!-- 1. always first -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">  <!-- 2. responsive -->
-  <meta name="theme-color" content="#d81b60">             <!-- 3. PWA bar color บน mobile -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'>...">  <!-- 4. favicon (data URI กัน 404) -->
+  <meta name="theme-color" content="#d81b60">             <!-- 3. PWA bar color on mobile -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'>...">  <!-- 4. favicon (data URI prevents a 404) -->
   <title>App Name</title>                                 <!-- 5. tab title -->
 </head>
 ```
 
-GAS iframe ไม่ส่ง favicon → ใส่ data URI กัน 404 ใน Network tab
+The GAS iframe sends no favicon → use a data URI to avoid a 404 in the Network tab
 
 ---
 
-## Rule #10: log warning จาก client → server (debug บน mobile)
+## Rule #10: log warnings from client → server (debugging on mobile)
 
-มือถือไม่มี DevTools — ส่ง error กลับ server log:
+Mobile has no DevTools — send errors back to the server log:
 
 ```javascript
 // Client
@@ -247,8 +247,8 @@ window.addEventListener('error', (e) => {
 // Server
 function logClientError(payload) {
   Logger.log('[client error] ' + JSON.stringify(payload));
-  // หรือ append เข้า Logs sheet
+  // or append to a Logs sheet
 }
 ```
 
-ช่วย debug bug ที่เกิดบน iPhone Safari แต่ไม่เกิดบน desktop Chrome
+Helps debug bugs that appear on iPhone Safari but not on desktop Chrome

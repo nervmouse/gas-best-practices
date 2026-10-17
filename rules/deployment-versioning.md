@@ -1,70 +1,70 @@
 # Deployment & Versioning (clasp)
 
-## Rule #1: `clasp push` ไม่ทำให้เว็บ production เปลี่ยน — ต้องสร้าง version ใหม่ของ deployment
+## Rule #1: `clasp push` does not change the production web app — you must create a new version of the deployment
 
-**Why:** bug คลาสสิกอันดับหนึ่งของมือใหม่ GAS — push โค้ดแล้วเปิดเว็บ `/exec` ไม่เห็นของใหม่ เพราะ deployment แบบ versioned จะ**ตรึงโค้ด ณ version ที่ deploy** ไว้
+**Why:** the classic number-one beginner GAS bug — push the code, open `/exec`, and see nothing new, because a versioned deployment **pins the code at the version you deployed**
 
-| URL | รันโค้ดจาก | ใครเข้าได้ |
+| URL | Runs code from | Who can access |
 |---|---|---|
-| `.../dev` | **HEAD** (โค้ดล่าสุดที่ push) | เฉพาะคนมีสิทธิ์แก้ script |
-| `.../exec` | **version ที่ deploy ไว้** | ตาม `webapp.access` |
+| `.../dev` | **HEAD** (the latest pushed code) | only people with script edit rights |
+| `.../exec` | **the deployed version** | per `webapp.access` |
 
-### ✓ Flow ที่ถูก
+### ✓ The correct flow
 
 ```bash
-clasp push                      # อัพโค้ดขึ้น HEAD
-# ทดสอบผ่าน /dev URL ก่อน
-clasp deploy -i <deploymentId> -d "v12 fix pdf margin"   # อัพเดท deployment เดิม → /exec เปลี่ยน
+clasp push                      # upload the code to HEAD
+# test via the /dev URL first
+clasp deploy -i <deploymentId> -d "v12 fix pdf margin"   # update the existing deployment → /exec changes
 ```
 
 ---
 
-## Rule #2: อัพเดท deployment **เดิม** (`-i <deploymentId>`) — ห้าม `clasp deploy` เปล่า ๆ ซ้ำ
+## Rule #2: Update the **same** deployment (`-i <deploymentId>`) — never run bare `clasp deploy` again
 
-**Why:** `clasp deploy` โดยไม่ระบุ `-i` จะสร้าง deployment **ใหม่** พร้อม **URL ใหม่** — ลิงก์ที่แจก user ไปแล้ว/ฝังใน LINE rich menu/QR code จะยังชี้ deployment เก่าที่รันโค้ดเก่าตลอดไป
+**Why:** `clasp deploy` without `-i` creates a **new** deployment with a **new URL** — the links you already sent to users / embedded in a LINE rich menu / QR code keep pointing at the old deployment running the old code
 
 ```bash
-# ดู deployment ที่มีอยู่
+# see existing deployments
 clasp deployments
 # - AKfycb...XYZ @12 - production
 
-# ✓ deploy ทับตัวเดิม — URL ไม่เปลี่ยน
+# ✓ deploy over the existing one — the URL stays the same
 clasp deploy -i AKfycb...XYZ -d "v13 add export excel"
 ```
 
-ใน Apps Script editor: **Deploy → Manage deployments → ✏️ edit → Version: New version → Deploy** (ผลเหมือนกัน)
+In the Apps Script editor: **Deploy → Manage deployments → ✏️ edit → Version: New version → Deploy** (same result)
 
 ---
 
-## Rule #3: ใช้ 2 deployments — `dev` กับ `production`
+## Rule #3: Use 2 deployments — `dev` and `production`
 
-**Why:** ทดสอบบน URL เดียวกับที่ user ใช้จริง = user เจอ bug ก่อนคุณ
+**Why:** testing on the same URL users really use = users find bugs before you do
 
 ```
-Deployment "production"  → URL แจก user จริง — อัพเดทเฉพาะเมื่อทดสอบผ่านแล้ว
-Deployment "staging"     → URL สำหรับทีมทดสอบ — อัพเดทบ่อยได้
-HEAD (/dev)              → developer เท่านั้น — เปลี่ยนทุกครั้งที่ push
+Deployment "production"  → the URL handed to real users — update only after testing passes
+Deployment "staging"     → URL for the testing team — update often
+HEAD (/dev)              → developers only — changes on every push
 ```
 
-เก็บ deployment ID ทั้งสองไว้ใน README ของโปรเจ็ค — กันสับสนว่าอันไหนเป็นอันไหน
+Keep both deployment IDs in the project README — prevents mixing up which is which
 
 ---
 
-## Rule #4: จด version + วันที่ + สรุปการเปลี่ยนแปลงใน description ทุกครั้ง
+## Rule #4: Record version + date + change summary in the description every time
 
-**Why:** ตอนของพังใน production คำถามแรกคือ "version ล่าสุดเปลี่ยนอะไร แล้ว rollback ไป version ไหนดี" — description ว่าง ๆ ตอบไม่ได้
+**Why:** when production breaks, the first question is "what did the latest version change, and which version should we roll back to?" — an empty description answers nothing
 
 ```bash
 clasp deploy -i <id> -d "2026-08-14 v14: fix leading zero phone (spreadsheet-ops #6.6)"
 ```
 
-**Rollback:** Manage deployments → edit → เลือก version เก่า → Deploy (URL เดิม โค้ดถอยกลับ)
+**Rollback:** Manage deployments → edit → pick the old version → Deploy (same URL, code rolls back)
 
 ---
 
-## Rule #5: ฝัง version string ในโค้ด — ให้เช็คได้ว่า user รันตัวไหนอยู่
+## Rule #5: Embed a version string in the code — so you can check which one the user is running
 
-**Why:** เวลา user รายงาน bug คำถามคือ "คุณใช้เวอร์ชันไหน" — browser cache ทำให้ frontend กับ backend คนละ version ได้ (ดู `rules/logging-boundaries.md` เรื่อง version stamp)
+**Why:** when a user reports a bug the question is "which version are you on?" — browser cache can put the frontend and the backend on different versions (see the version stamp topic in `rules/logging-boundaries.md`)
 
 ```javascript
 const APP_VERSION = 'v14-2026-08-14';
@@ -74,13 +74,13 @@ function getAppInfo() {
 }
 ```
 
-แสดง version ที่ footer ของหน้าเว็บ + log ทุกครั้งที่ RPC สำคัญถูกเรียก
+Show the version in the page footer + log it on every important RPC call
 
 ---
 
-## Rule #6: `.claspignore` — อย่า push ไฟล์ที่ไม่ใช่ source ขึ้น Apps Script
+## Rule #6: `.claspignore` — never push non-source files into Apps Script
 
-**Why:** clasp push ทุกไฟล์ในโฟลเดอร์ default — README, ไฟล์ test, `.env` ตัวอย่าง จะโผล่ใน Apps Script editor (และไฟล์ `.js` ทุกตัวกลายเป็น server code ที่รันได้)
+**Why:** clasp pushes every file in the folder by default — README, test files, sample `.env` all show up in the Apps Script editor (and every `.js` file becomes runnable server code)
 
 ```
 # .claspignore
@@ -90,10 +90,10 @@ function getAppInfo() {
 !appsscript.json
 ```
 
-(pattern แบบ allowlist — ระบุเฉพาะที่ต้องการ push)
+(allowlist-style patterns — name only what you want to push)
 
 ---
 
-## Rule #7: เปลี่ยน `webapp.access` / `executeAs` แล้วต้อง deploy version ใหม่เสมอ
+## Rule #7: Changing `webapp.access` / `executeAs` always requires a new deployment version
 
-**Why:** ค่าใน `appsscript.json` มีผลตอน deploy — แก้ไฟล์เฉย ๆ แล้ว push ไม่พอ และการเปลี่ยน `executeAs` อาจทำให้ Google ขอ re-authorize ใหม่ทั้ง scope — แจ้ง user ก่อน ไม่งั้นเจอหน้า permission ตกใจกันทั้งหน่วยงาน
+**Why:** values in `appsscript.json` take effect at deploy time — editing the file and pushing is not enough, and changing `executeAs` can make Google re-request authorization for all scopes — tell users in advance, or the whole organization panics when the permission screen appears
